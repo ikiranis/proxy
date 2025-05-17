@@ -25,9 +25,11 @@ public class GeneralController {
     }
     
     @PostMapping(path = "/api/forward")
-    public ResponseEntity<String> forwardToClient(@RequestParam String clientName, @RequestBody String requestData) {
+    public ResponseEntity<String> forwardToClient(@RequestParam String clientName, @RequestParam String httpMethodType, @RequestBody String requestData) {
         try {
-            String response = proxyService.forwardToClient(clientName, requestData);
+            // Pass method type and data to the client in the format: METHOD|DATA
+            String requestForClient = httpMethodType + " " + requestData;
+            String response = proxyService.forwardToClient(clientName, requestForClient);
             return ResponseEntity.ok(response);
         } catch (Exception e) {
             if (e.getMessage().contains("Client not connected")) {
