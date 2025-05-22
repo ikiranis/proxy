@@ -1,0 +1,11 @@
+spring.application.name=proxy
+
+# Port to run application on
+server.port=9999
+
+#server.ssl.enabled=true
+#server.address=0.0.0.0
+#server.ssl.key-store=classpath:<serverIP>.p12
+#server.ssl.key-store-password=changeit
+#server.ssl.keyStoreType=PKCS12
+#server.ssl.keyAlias=1
