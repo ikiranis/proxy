@@ -2,6 +2,8 @@
 
 This application acts as a proxy between HTTP clients and internal clients connected via sockets. It can run in two modes: **server** and **client**.
 
+![proxy](https://github.com/user-attachments/assets/2d7f2b50-1850-4869-a601-525a81949a34)
+
 ## How It Works
 
 - **Server Mode**:
