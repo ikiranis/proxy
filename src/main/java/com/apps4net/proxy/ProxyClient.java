@@ -49,12 +49,12 @@ public class ProxyClient {
 
     /**
      * Forwards an HTTP request to the LAN webserver using the provided method, URL, and body.
-     * Returns the response body as a string, or an error message if the request fails.
+     * Returns the response body and headers as a string, or an error message if the request fails.
      *
      * @param httpMethodType The HTTP method (GET, POST, etc.)
      * @param url The URL to forward the request to
      * @param body The request body (may be null or empty for GET)
-     * @return The response body from the LAN webserver, or an error message
+     * @return The response body and headers from the LAN webserver, or an error message
      */
     private String forwardToLanWebserver(String httpMethodType, String url, String body) {
         // Disable SSL certificate validation (INSECURE: for development only)
@@ -75,7 +75,6 @@ public class ProxyClient {
         }
         System.out.println("Forwarding request to LAN webserver: " + httpMethodType + " " + url);
         try {
-            // Use the provided local API endpoint
             java.net.URL apiUrl = new java.net.URL(url);
             java.net.HttpURLConnection conn = (java.net.HttpURLConnection) apiUrl.openConnection();
             conn.setRequestMethod(httpMethodType);
@@ -89,20 +88,33 @@ public class ProxyClient {
             System.out.println("Request method: " + httpMethodType);
             System.out.println("Request body: " + body);
 
-            // Read the response
             int status = conn.getResponseCode();
-
             System.out.println("Response code: " + status);
-            java.io.BufferedReader reader = new java.io.BufferedReader(new java.io.InputStreamReader(
-                    status >= 200 && status < 300 ? conn.getInputStream() : conn.getErrorStream()
-            ));
-            StringBuilder response = new StringBuilder();
-            String line;
-            while ((line = reader.readLine()) != null) {
-                response.append(line).append("\n");
+
+            // Collect headers
+            StringBuilder headers = new StringBuilder();
+            for (int i = 1;; i++) {
+                String headerKey = conn.getHeaderFieldKey(i);
+                String headerValue = conn.getHeaderField(i);
+                if (headerKey == null && headerValue == null) break;
+                if (headerKey != null && headerValue != null) {
+                    headers.append(headerKey).append(": ").append(headerValue).append("\n");
+                }
             }
-            reader.close();
-            return response.toString().trim();
+
+            // Read the response as bytes (for binary data like PDF)
+            java.io.InputStream is = (status >= 200 && status < 300) ? conn.getInputStream() : conn.getErrorStream();
+            java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream();
+            byte[] buffer = new byte[4096];
+            int bytesRead;
+            while ((bytesRead = is.read(buffer)) != -1) {
+                baos.write(buffer, 0, bytesRead);
+            }
+            is.close();
+            // Encode the bytes as Base64 to safely transmit binary data
+            String base64Body = java.util.Base64.getEncoder().encodeToString(baos.toByteArray());
+            // Return both headers and base64-encoded body
+            return "Headers:\n" + headers + "\nBody-Base64:\n" + base64Body;
         } catch (Exception e) {
             return "LAN webserver error: " + e.getMessage();
         }

@@ -29,7 +29,27 @@ public class GeneralController {
     public ResponseEntity<?> forwardToClient(@RequestBody ProxyRequest proxyRequest) {
         try {
             ProxyResponse response = proxyService.forwardToClient(proxyRequest);
-            return ResponseEntity.ok(response);
+            // If the response body contains headers and base64 body, parse and set headers
+            if (response.getBody() != null && response.getBody().startsWith("Headers:\n")) {
+                String[] parts = response.getBody().split("\\nBody-Base64:\\n", 2);
+                if (parts.length == 2) {
+                    String headersBlock = parts[0].replaceFirst("Headers:\\n", "");
+                    String base64Body = parts[1];
+                    ResponseEntity.BodyBuilder builder = ResponseEntity.status(response.getStatusCode());
+                    for (String headerLine : headersBlock.split("\\n")) {
+                        int idx = headerLine.indexOf(": ");
+                        if (idx > 0) {
+                            String headerName = headerLine.substring(0, idx);
+                            String headerValue = headerLine.substring(idx + 2);
+                            builder.header(headerName, headerValue);
+                        }
+                    }
+                    // Decode base64 body
+                    byte[] bodyBytes = java.util.Base64.getDecoder().decode(base64Body);
+                    return builder.body(bodyBytes);
+                }
+            }
+            return ResponseEntity.status(response.getStatusCode()).body(response.getBody());
         } catch (Exception e) {
             if (e.getMessage().contains("Client not connected")) {
                 return ResponseEntity.status(HttpStatus.NOT_FOUND).body(e.getMessage());
