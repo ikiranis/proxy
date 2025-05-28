@@ -115,4 +115,19 @@ public class ProxyService {
     public boolean isClientConnected(String clientName) {
         return clients.containsKey(clientName);
     }
+
+    /**
+     * Gets the current number of connected clients.
+     * 
+     * This method provides a count of all currently connected and active
+     * proxy clients. It's useful for monitoring server load and capacity,
+     * as well as for health check reporting.
+     * 
+     * @return the number of currently connected clients
+     * 
+     * @see GeneralController#healthCheck()
+     */
+    public int getConnectedClientCount() {
+        return clients.size();
+    }
 }
