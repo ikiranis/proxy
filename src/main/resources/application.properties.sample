@@ -1,7 +1,7 @@
 spring.application.name=proxy
 
 # Port to run application on
-server.port=9999
+server.port=9990
 
 #server.ssl.enabled=true
 #server.address=0.0.0.0

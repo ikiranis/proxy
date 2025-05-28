@@ -77,7 +77,7 @@ public class ProxyApplication {
 		}
 		// Default: server mode
 		SpringApplication.run(ProxyApplication.class, args);
-		Logger.info("Run app on http://localhost:8444");
+		Logger.info("Run app on http://localhost:9990");
 	}
 
 }
