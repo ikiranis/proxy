@@ -2,8 +2,6 @@ package com.apps4net.proxy.controllers;
 
 import java.net.Socket;
 import java.util.Map;
-import java.util.concurrent.ArrayBlockingQueue;
-import java.util.concurrent.BlockingQueue;
 import com.apps4net.proxy.shared.ProxyRequest;
 import com.apps4net.proxy.shared.ProxyResponse;
 import com.apps4net.proxy.utils.Logger;
@@ -14,7 +12,6 @@ public class ClientHandler extends Thread {
     private final Socket socket;
     private final Map<String, ClientHandler> clients;
     private String clientName;
-    private final BlockingQueue<String> responseQueue = new ArrayBlockingQueue<>(1);
     private ObjectOutputStream objectOut;
     private ObjectInputStream objectIn;
 
