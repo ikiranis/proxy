@@ -5,6 +5,25 @@ import java.io.ObjectOutputStream;
 import java.net.Socket;
 import com.apps4net.proxy.utils.Logger;
 
+/**
+ * A proxy client that connects to a proxy server and forwards HTTP requests to local web servers.
+ * 
+ * This client provides the following capabilities:
+ * - Automatic connection management with reconnection on failure
+ * - Health monitoring with periodic heartbeat checks
+ * - HTTP request forwarding to LAN-based web servers
+ * - Support for both HTTP and HTTPS with SSL validation bypass
+ * - Binary content handling with Base64 encoding
+ * - Graceful shutdown and cleanup
+ * 
+ * The client automatically handles network interruptions by attempting to
+ * reconnect every 5 seconds and performs health checks every 30 seconds to
+ * ensure connection stability.
+ * 
+ * @author Apps4Net
+ * @version 1.0
+ * @since 1.0
+ */
 public class ProxyClient {
     private final String clientName;
     private final String serverHost;
@@ -13,12 +32,34 @@ public class ProxyClient {
     private static final int RECONNECT_DELAY_MS = 5000; // 5 seconds
     private static final int HEARTBEAT_INTERVAL_MS = 30000; // 30 seconds
 
+    /**
+     * Creates a new ProxyClient with the specified connection parameters.
+     * 
+     * @param clientName unique identifier for this client instance
+     * @param serverHost hostname or IP address of the proxy server
+     * @param serverPort port number of the proxy server
+     */
     public ProxyClient(String clientName, String serverHost, int serverPort) {
         this.clientName = clientName;
         this.serverHost = serverHost;
         this.serverPort = serverPort;
     }
 
+    /**
+     * Starts the proxy client and begins the connection management loop.
+     * 
+     * This method runs continuously until {@link #stop()} is called. It handles:
+     * - Initial connection establishment
+     * - Automatic reconnection on connection failures
+     * - Graceful handling of network interruptions
+     * - Proper cleanup on shutdown
+     * 
+     * The method will block the calling thread. For non-blocking operation,
+     * run this method in a separate thread.
+     * 
+     * @see #stop()
+     * @see #connectAndCommunicate()
+     */
     public void start() {
         isRunning = true;
         while (isRunning) {
@@ -44,10 +85,41 @@ public class ProxyClient {
         Logger.info("ProxyClient stopped");
     }
 
+    /**
+     * Stops the proxy client and terminates all connections.
+     * 
+     * This method performs a graceful shutdown by:
+     * - Setting the running flag to false
+     * - Interrupting the main connection loop
+     * - Allowing current operations to complete
+     * - Triggering cleanup of resources
+     * 
+     * The method returns immediately; actual shutdown may take a few seconds.
+     */
     public void stop() {
         isRunning = false;
     }
 
+    /**
+     * Establishes connection to the server and handles the main communication loop.
+     * 
+     * This method performs the following operations:
+     * 1. Creates socket connection and object streams
+     * 2. Registers the client with the server
+     * 3. Starts heartbeat monitoring thread
+     * 4. Processes incoming proxy requests
+     * 5. Forwards requests to LAN web servers
+     * 6. Returns responses to the proxy server
+     * 
+     * The method includes timeout handling and health checks to detect
+     * connection issues promptly.
+     * 
+     * @throws Exception if connection fails, communication errors occur, or the socket becomes unhealthy
+     * 
+     * @see #startHeartbeatThread(Socket)
+     * @see #isSocketHealthy(Socket)
+     * @see #forwardToLanWebserver(String, String, String)
+     */
     private void connectAndCommunicate() throws Exception {
         try (Socket socket = new Socket(serverHost, serverPort);
              ObjectOutputStream objectOut = new ObjectOutputStream(socket.getOutputStream());
@@ -101,6 +173,21 @@ public class ProxyClient {
         }
     }
 
+    /**
+     * Starts a daemon thread that monitors connection health via periodic heartbeats.
+     * 
+     * The heartbeat thread:
+     * - Runs every 30 seconds
+     * - Performs socket health checks
+     * - Logs connection status
+     * - Terminates if connection becomes unhealthy
+     * - Handles interruption gracefully during shutdown
+     * 
+     * @param socket the socket connection to monitor
+     * @return the heartbeat thread instance for lifecycle management
+     * 
+     * @see #isSocketHealthy(Socket)
+     */
     private Thread startHeartbeatThread(Socket socket) {
         Thread heartbeatThread = new Thread(() -> {
             while (isRunning && !socket.isClosed()) {
@@ -125,6 +212,20 @@ public class ProxyClient {
         return heartbeatThread;
     }
 
+    /**
+     * Performs a health check on the socket connection.
+     * 
+     * This method verifies connection health by:
+     * 1. Checking if the socket is open and connected
+     * 2. Attempting to write a test byte to the output stream
+     * 3. Flushing the stream to detect write failures
+     * 
+     * The health check is non-intrusive and should not affect normal
+     * communication flow.
+     * 
+     * @param socket the socket connection to check
+     * @return true if the socket is healthy and writable, false otherwise
+     */
     private boolean isSocketHealthy(Socket socket) {
         if (socket == null || socket.isClosed() || !socket.isConnected()) {
             return false;
@@ -141,6 +242,21 @@ public class ProxyClient {
         }
     }
 
+    /**
+     * Determines if an exception is related to network connectivity issues.
+     * 
+     * This method classifies exceptions to enable intelligent error handling:
+     * - Network exceptions: logged without stack traces to reduce noise
+     * - Other exceptions: logged with full stack traces for debugging
+     * 
+     * Recognized network exception patterns include:
+     * - SocketException, ConnectException, SocketTimeoutException
+     * - Connection reset, Connection refused
+     * - Broken pipe, Network unreachable
+     * 
+     * @param e the exception to classify
+     * @return true if the exception is network-related, false otherwise
+     */
     private boolean isNetworkException(Exception e) {
         String className = e.getClass().getSimpleName();
         String message = e.getMessage();
