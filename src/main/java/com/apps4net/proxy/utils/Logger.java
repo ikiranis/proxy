@@ -16,7 +16,24 @@ public class Logger {
     
     public static void error(String message, Exception e) {
         System.err.println(getTimestamp() + " [ERROR] " + message);
-        e.printStackTrace();
+        // Only print stack trace for non-network exceptions
+        if (isNetworkException(e)) {
+            System.err.println(getTimestamp() + " [ERROR] " + e.getClass().getSimpleName() + ": " + e.getMessage());
+        } else {
+            e.printStackTrace();
+        }
+    }
+    
+    private static boolean isNetworkException(Exception e) {
+        String className = e.getClass().getSimpleName();
+        String message = e.getMessage();
+        return className.equals("SocketException") || 
+               className.equals("ConnectException") ||
+               className.equals("SocketTimeoutException") ||
+               (message != null && (message.contains("Connection reset") || 
+                                   message.contains("Connection refused") ||
+                                   message.contains("Broken pipe") ||
+                                   message.contains("Network is unreachable")));
     }
     
     private static String getTimestamp() {
