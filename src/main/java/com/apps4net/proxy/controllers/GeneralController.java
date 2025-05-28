@@ -20,13 +20,15 @@ public class GeneralController {
         this.proxyService = proxyService;
     }
 
-    @GetMapping(path = "/") 
-    public String index() {
-        return "index";
-    }
-    
     @PostMapping(path = "/api/forward", consumes = "application/json", produces = "application/json")
     public ResponseEntity<?> forwardToClient(@RequestBody ProxyRequest proxyRequest) {
+        // Check if client is connected before forwarding the request
+        String clientName = proxyRequest.getClientName();
+        if (!proxyService.isClientConnected(clientName)) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                    .body("{\"error\": \"Client not connected\", \"clientName\": \"" + clientName + "\"}");
+        }
+        
         try {
             ProxyResponse response = proxyService.forwardToClient(proxyRequest);
             // If the response body contains headers and base64 body, parse and set headers
@@ -52,9 +54,12 @@ public class GeneralController {
             return ResponseEntity.status(response.getStatusCode()).body(response.getBody());
         } catch (Exception e) {
             if (e.getMessage().contains("Client not connected")) {
-                return ResponseEntity.status(HttpStatus.NOT_FOUND).body(e.getMessage());
+                return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                        .body("{\"error\": \"Client not connected\", \"message\": \"" + e.getMessage() + "\"}");
             }
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body("Error: " + e.getMessage());
+
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body("{\"error\": \"Internal server error\", \"message\": \"" + e.getMessage() + "\"}");
         }
     }
 }

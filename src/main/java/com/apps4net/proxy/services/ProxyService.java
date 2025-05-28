@@ -9,6 +9,7 @@ import java.io.IOException;
 import com.apps4net.proxy.controllers.ClientHandler;
 import com.apps4net.proxy.shared.ProxyRequest;
 import com.apps4net.proxy.shared.ProxyResponse;
+import com.apps4net.proxy.utils.Logger;
 
 @Service
 public class ProxyService {
@@ -30,7 +31,7 @@ public class ProxyService {
                         handler.start();
                     }
                 } catch (IOException e) {
-                    e.printStackTrace();
+                    Logger.error("Socket server error", e);
                 }
             }).start();
         }
@@ -40,7 +41,7 @@ public class ProxyService {
         String clientName = proxyRequest.getClientName();
         ClientHandler client = clients.get(clientName);
 
-        System.out.println("Forwarding request to client '" + clientName + "': " + proxyRequest);
+        Logger.info("Forwarding request to client '" + clientName + "': " + proxyRequest);
 
         if (client == null) {
             throw new Exception("Client not connected");

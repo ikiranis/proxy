@@ -3,6 +3,7 @@ package com.apps4net.proxy;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.net.Socket;
+import com.apps4net.proxy.utils.Logger;
 
 public class ProxyClient {
     private final String clientName;
@@ -23,27 +24,26 @@ public class ProxyClient {
             // First message from client should be its name
             objectOut.writeObject(clientName);
             objectOut.flush();
-            System.out.println("[CLIENT] Sent client name: " + clientName);
+            Logger.info("[CLIENT] Sent client name: " + clientName);
             while (true) {
                 // Wait for ProxyRequest from server
                 Object obj = objectIn.readObject();
                 if (!(obj instanceof com.apps4net.proxy.shared.ProxyRequest)) {
-                    System.err.println("[CLIENT] Received unknown object from server: " + obj);
+                    Logger.error("[CLIENT] Received unknown object from server: " + obj);
                     continue;
                 }
                 com.apps4net.proxy.shared.ProxyRequest proxyRequest = (com.apps4net.proxy.shared.ProxyRequest) obj;
-                System.out.println("[CLIENT] Received ProxyRequest: " + proxyRequest.getHttpMethodType() + " " + proxyRequest.getUrl());
+                Logger.info("[CLIENT] Received ProxyRequest: " + proxyRequest.getHttpMethodType() + " " + proxyRequest.getUrl());
                 // Perform the API call
                 String responseBody = forwardToLanWebserver(proxyRequest.getHttpMethodType(), proxyRequest.getUrl(), proxyRequest.getBody());
                 // For demo, always return 200
                 com.apps4net.proxy.shared.ProxyResponse proxyResponse = new com.apps4net.proxy.shared.ProxyResponse(200, responseBody);
                 objectOut.writeObject(proxyResponse);
                 objectOut.flush();
-                System.out.println("[CLIENT] Sent ProxyResponse to server");
+                Logger.info("[CLIENT] Sent ProxyResponse to server");
             }
         } catch (Exception e) {
-            System.err.println("Client error: " + e.getMessage());
-            e.printStackTrace();
+            Logger.error("Client error: " + e.getMessage(), e);
         }
     }
 
@@ -71,9 +71,9 @@ public class ProxyClient {
             javax.net.ssl.HttpsURLConnection.setDefaultSSLSocketFactory(sc.getSocketFactory());
             javax.net.ssl.HttpsURLConnection.setDefaultHostnameVerifier((hostname, session) -> true);
         } catch (Exception e) {
-            System.err.println("[CLIENT] Failed to disable SSL validation: " + e.getMessage());
+            Logger.error("[CLIENT] Failed to disable SSL validation: " + e.getMessage());
         }
-        System.out.println("Forwarding request to LAN webserver: " + httpMethodType + " " + url);
+        Logger.info("Forwarding request to LAN webserver: " + httpMethodType + " " + url);
         try {
             java.net.URL apiUrl = new java.net.URL(url);
             java.net.HttpURLConnection conn = (java.net.HttpURLConnection) apiUrl.openConnection();
@@ -85,11 +85,11 @@ public class ProxyClient {
                     writer.print(body);
                 }
             }
-            System.out.println("Request method: " + httpMethodType);
-            System.out.println("Request body: " + body);
+            Logger.info("Request method: " + httpMethodType);
+            Logger.info("Request body: " + body);
 
             int status = conn.getResponseCode();
-            System.out.println("Response code: " + status);
+            Logger.info("Response code: " + status);
 
             // Collect headers
             StringBuilder headers = new StringBuilder();

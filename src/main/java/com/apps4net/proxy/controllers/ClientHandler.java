@@ -6,6 +6,7 @@ import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
 import com.apps4net.proxy.shared.ProxyRequest;
 import com.apps4net.proxy.shared.ProxyResponse;
+import com.apps4net.proxy.utils.Logger;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 
@@ -29,7 +30,7 @@ public class ClientHandler extends Thread {
             // First message from client should be its name
             clientName = (String) objectIn.readObject();
             clients.put(clientName, this);
-            System.out.println("Client '" + clientName + "' connected.");
+            Logger.info("Client '" + clientName + "' connected.");
             // No request/response loop here; handled by sendRequestAndGetResponse
             // Just keep the thread alive until socket closes
             while (!socket.isClosed()) {
@@ -38,7 +39,7 @@ public class ClientHandler extends Thread {
                 } catch (InterruptedException ignored) {}
             }
         } catch (Exception e) {
-            e.printStackTrace();
+            Logger.error("Client handler error", e);
         } finally {
             if (clientName != null) clients.remove(clientName);
             try { socket.close(); } catch (java.io.IOException ignored) {}
@@ -47,7 +48,7 @@ public class ClientHandler extends Thread {
 
     // Send request to client and wait for response
     public synchronized ProxyResponse sendRequestAndGetResponse(ProxyRequest proxyRequest) throws Exception {
-        System.out.println("Sending ProxyRequest to client '" + clientName + "': " + proxyRequest);
+        Logger.info("Sending ProxyRequest to client '" + clientName + "': " + proxyRequest);
         objectOut.writeObject(proxyRequest);
         objectOut.flush();
         // Wait for ProxyResponse
