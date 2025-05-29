@@ -156,9 +156,7 @@ public class ClientHandler extends Thread {
                 "\r\n" +
                 "{\n" +
                 "  \"error\": \"Invalid Protocol\",\n" +
-                "  \"message\": \"This port (5000) is for proxy client connections using Java object serialization.\",\n" +
-                "  \"instructions\": \"For HTTP requests, use the REST API at /api/forward on the web server port (9990).\",\n" +
-                "  \"example\": \"POST http://localhost:9990/api/forward\"\n" +
+                "  \"message\": \"This port is for proxy client connections only.\",\n" +
                 "}\n";
             
             socket.getOutputStream().write(httpResponse.getBytes());

@@ -197,7 +197,6 @@ public class ProxyClient {
                         Logger.error("Heartbeat: Socket connection is unhealthy");
                         break;
                     }
-                    Logger.info("Heartbeat: Connection is healthy");
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
                     break;
