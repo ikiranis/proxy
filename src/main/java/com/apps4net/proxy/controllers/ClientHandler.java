@@ -8,8 +8,6 @@ import com.apps4net.proxy.shared.ProxyResponse;
 import com.apps4net.proxy.utils.Logger;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
-import java.io.BufferedInputStream;
-import java.io.IOException;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -102,61 +100,14 @@ public class ClientHandler extends Thread {
         Logger.info("IP security check passed for: " + clientIP);
         
         try {
-            Logger.info("Initializing protocol detection...");
-            // Wrap the socket input stream in a BufferedInputStream which supports mark/reset
-            BufferedInputStream bufferedInput = new BufferedInputStream(socket.getInputStream(), 8192); // Increase buffer size
+            Logger.info("Initializing object streams for proxy client communication...");
             
-            // First, detect if this is an HTTP request by reading the first few bytes
-            Logger.info("Reading first bytes to detect protocol...");
-            
-            // Use a more robust protocol detection approach
-            boolean isHttpRequest = false;
-            try {
-                bufferedInput.mark(16); // Mark more bytes to be safe
-                byte[] buffer = new byte[16]; // Read more bytes for better detection
-                int bytesRead = bufferedInput.read(buffer);
-                Logger.info("Read " + bytesRead + " bytes for protocol detection");
-                
-                if (bytesRead >= 3) {
-                    String header = new String(buffer, 0, Math.min(bytesRead, 16));
-                    Logger.info("Protocol detection header: '" + header.replaceAll("\\r|\\n", "\\\\n") + "'");
-                    
-                    // More comprehensive HTTP method detection
-                    if (header.startsWith("GET ") || header.startsWith("POST ") || 
-                        header.startsWith("PUT ") || header.startsWith("HEAD ") || 
-                        header.startsWith("DELETE ") || header.startsWith("OPTIONS ") ||
-                        header.startsWith("PATCH ") || header.startsWith("TRACE ") ||
-                        header.startsWith("CONNECT ")) {
-                        
-                        isHttpRequest = true;
-                        Logger.info("THREAT DETECTED: HTTP request from " + clientIP + " to socket port (port scanning/vulnerability probe)");
-                        recordSuspiciousActivity(clientIP, "HTTP_REQUEST_TO_SOCKET_PORT");
-                    }
-                }
-                
-                if (isHttpRequest) {
-                    handleHttpRequest();
-                    Logger.info("=== CLIENT HANDLER ENDED (HTTP THREAT) ===");
-                    return;
-                }
-                
-                Logger.info("Protocol detection complete - appears to be Java object stream");
-                // Reset the stream to the beginning for normal object stream processing
-                bufferedInput.reset();
-                Logger.info("Stream reset for object communication");
-                
-            } catch (IOException markResetException) {
-                Logger.error("Mark/reset failed during protocol detection: " + markResetException.getMessage());
-                Logger.info("Falling back to direct object stream processing (likely legitimate client)");
-                // If mark/reset fails, assume it's a legitimate client and proceed with object stream
-                // Don't record this as suspicious activity - it's a common issue with some network conditions
-            }
-            
-            // Initialize object streams for proxy client communication
+            // Initialize object streams directly without protocol detection
+            // The ObjectInputStream will naturally throw an exception if HTTP data is sent
             Logger.info("Creating ObjectOutputStream...");
             objectOut = new ObjectOutputStream(socket.getOutputStream());
             Logger.info("Creating ObjectInputStream...");
-            objectIn = new ObjectInputStream(bufferedInput);
+            objectIn = new ObjectInputStream(socket.getInputStream());
             Logger.info("Object streams created successfully");
             
             // First message from client should be the authentication token
@@ -311,12 +262,53 @@ public class ClientHandler extends Thread {
      */
     // Send request to client and wait for response
     public synchronized ProxyResponse sendRequestAndGetResponse(ProxyRequest proxyRequest) throws Exception {
-        Logger.info("Sending ProxyRequest to client '" + clientName + "': " + proxyRequest);
-        objectOut.writeObject(proxyRequest);
-        objectOut.flush();
-        // Wait for ProxyResponse
-        ProxyResponse proxyResponse = (ProxyResponse) objectIn.readObject();
-        return proxyResponse;
+        try {
+            Logger.info("Sending ProxyRequest to client '" + clientName + "': " + proxyRequest);
+            
+            // Check if connection is still alive before sending
+            if (socket.isClosed() || !socket.isConnected()) {
+                throw new Exception("Client socket is closed or disconnected");
+            }
+            
+            objectOut.writeObject(proxyRequest);
+            objectOut.flush();
+            Logger.info("ProxyRequest sent successfully, waiting for response...");
+            
+            // Wait for ProxyResponse with better error handling
+            Object responseObj = objectIn.readObject();
+            Logger.info("Received response object of type: " + responseObj.getClass().getName());
+            
+            if (!(responseObj instanceof ProxyResponse)) {
+                throw new Exception("Received unexpected object type: " + responseObj.getClass().getName() + " (expected ProxyResponse)");
+            }
+            
+            ProxyResponse proxyResponse = (ProxyResponse) responseObj;
+            Logger.info("ProxyResponse received successfully from client '" + clientName + "'");
+            return proxyResponse;
+            
+        } catch (java.io.StreamCorruptedException e) {
+            Logger.error("Stream corruption detected while communicating with client '" + clientName + "'");
+            Logger.error("This typically indicates the client disconnected or sent invalid data");
+            Logger.error("Error details: " + e.getMessage());
+            throw new Exception("Communication error with client '" + clientName + "': Stream corrupted - " + e.getMessage());
+            
+        } catch (java.io.EOFException e) {
+            Logger.error("Unexpected end of stream while reading response from client '" + clientName + "'");
+            Logger.error("This typically indicates the client disconnected during response transmission");
+            throw new Exception("Communication error with client '" + clientName + "': Client disconnected during response");
+            
+        } catch (java.io.IOException e) {
+            Logger.error("I/O error during communication with client '" + clientName + "'");
+            Logger.error("Socket state: closed=" + socket.isClosed() + ", connected=" + socket.isConnected());
+            Logger.error("Error details: " + e.getMessage());
+            throw new Exception("Communication error with client '" + clientName + "': " + e.getMessage());
+            
+        } catch (ClassNotFoundException e) {
+            Logger.error("Class not found during response deserialization from client '" + clientName + "'");
+            Logger.error("This suggests a version mismatch between client and server");
+            Logger.error("Missing class: " + e.getMessage());
+            throw new Exception("Serialization error with client '" + clientName + "': " + e.getMessage());
+        }
     }
 
     /**

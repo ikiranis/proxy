@@ -196,7 +196,7 @@ public class ProxyClient {
                     }
                     
                     // Wait for ProxyRequest from server with timeout
-                    socket.setSoTimeout(1000); // 1 second timeout for checking isRunning
+                    socket.setSoTimeout(5000); // 5 second timeout for checking isRunning
                     Object obj;
                     try {
                         obj = objectIn.readObject();
@@ -216,13 +216,40 @@ public class ProxyClient {
                     Logger.info("[CLIENT] Received ProxyRequest: " + proxyRequest.getHttpMethodType() + " " + proxyRequest.getUrl());
                     
                     // Perform the API call
+                    Logger.info("[CLIENT] Starting API call to LAN webserver...");
                     String responseBody = forwardToLanWebserver(proxyRequest.getHttpMethodType(), proxyRequest.getUrl(), proxyRequest.getBody());
+                    Logger.info("[CLIENT] API call completed, response body length: " + (responseBody != null ? responseBody.length() : 0));
+                    
+                    if (responseBody == null) {
+                        Logger.error("[CLIENT] Warning: responseBody is null, setting to empty string");
+                        responseBody = "";
+                    }
                     
                     // For demo, always return 200
+                    Logger.info("[CLIENT] Creating ProxyResponse object...");
                     com.apps4net.proxy.shared.ProxyResponse proxyResponse = new com.apps4net.proxy.shared.ProxyResponse(200, responseBody);
-                    objectOut.writeObject(proxyResponse);
-                    objectOut.flush();
-                    Logger.info("[CLIENT] Sent ProxyResponse to server");
+                    Logger.info("[CLIENT] ProxyResponse created successfully, preparing to send to server...");
+                    
+                    try {
+                        Logger.info("[CLIENT] Attempting to serialize and send ProxyResponse...");
+                        Logger.info("[CLIENT] Response body size: " + (responseBody != null ? responseBody.length() : 0) + " characters");
+                        
+                        objectOut.writeObject(proxyResponse);
+                        objectOut.flush();
+                        Logger.info("[CLIENT] ProxyResponse sent successfully to server");
+                    } catch (java.io.IOException e) {
+                        Logger.error("[CLIENT] Failed to send ProxyResponse to server");
+                        Logger.error("[CLIENT] Socket state: closed=" + socket.isClosed() + ", connected=" + socket.isConnected());
+                        Logger.error("[CLIENT] Error type: " + e.getClass().getSimpleName());
+                        Logger.error("[CLIENT] Error message: " + e.getMessage());
+                        throw e; // Re-throw to break the communication loop
+                    } catch (Exception e) {
+                        Logger.error("[CLIENT] Unexpected error while sending ProxyResponse");
+                        Logger.error("[CLIENT] Error type: " + e.getClass().getSimpleName());
+                        Logger.error("[CLIENT] Error message: " + e.getMessage());
+                        Logger.error("[CLIENT] Full stack trace:", e);
+                        throw e;
+                    }
                 }
                 
                 Logger.info("[CLIENT] Communication loop ended");
@@ -318,15 +345,9 @@ public class ProxyClient {
             return false;
         }
         
-        try {
-            // Try to send a test byte and check if socket is writable
-            socket.getOutputStream().write(0);
-            socket.getOutputStream().flush();
-            return true;
-        } catch (java.io.IOException e) {
-            Logger.error("Socket health check failed: " + e.getMessage());
-            return false;
-        }
+        // Don't interfere with object streams by writing test bytes
+        // Just check the socket state
+        return true;
     }
 
     /**
@@ -442,7 +463,14 @@ public class ProxyClient {
             byte[] buffer = new byte[4096];
             int bytesRead;
             int totalBytes = 0;
+            final int MAX_RESPONSE_SIZE = 50 * 1024 * 1024; // 50MB limit
+            
             while ((bytesRead = is.read(buffer)) != -1) {
+                if (totalBytes + bytesRead > MAX_RESPONSE_SIZE) {
+                    Logger.error("Response size exceeds maximum allowed limit of " + (MAX_RESPONSE_SIZE / 1024 / 1024) + "MB");
+                    is.close();
+                    return "LAN webserver error: Response too large (exceeds " + (MAX_RESPONSE_SIZE / 1024 / 1024) + "MB limit)";
+                }
                 baos.write(buffer, 0, bytesRead);
                 totalBytes += bytesRead;
             }

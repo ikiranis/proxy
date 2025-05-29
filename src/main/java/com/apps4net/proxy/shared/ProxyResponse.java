@@ -8,6 +8,8 @@ import java.io.Serializable;
  * returned from a client after processing a ProxyRequest.
  */
 public class ProxyResponse implements Serializable {
+    private static final long serialVersionUID = 1L;
+    
     private int statusCode;
     private String body;
 

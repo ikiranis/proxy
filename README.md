@@ -100,9 +100,6 @@ Available actions:
 - `unban`: Remove an IP from the ban list and clear all tracking data
 - `status`: Get current security status
 - `check`: Check the ban status and auto-ban criteria for a specific IP
-- `trust`: Add an IP to the trusted list (will never be auto-banned)
-- `untrust`: Remove an IP from the trusted list
-- `trusted`: List all currently trusted IPs
 
 #### Security Status (Authentication Required)
 ```
@@ -167,6 +164,30 @@ curl -X POST http://localhost:9999/api/forward \
 - `controllers/ClientHandler.java`: Handles socket communication with a client.
 - `services/ProxyService.java`: Business logic and socket server for server mode.
 - `shared/ProxyRequest.java`, `shared/ProxyResponse.java`: Serializable request/response objects for robust communication.
+
+## Security System
+
+The proxy server includes an advanced security system to protect against malicious activity:
+
+### Auto-Ban Protection
+- **Automatic IP Banning**: IPs are automatically banned after 5 authentication failures within a 15-minute window
+- **Progressive Penalties**: After 15 total authentication failures across all time, IPs receive permanent bans
+- **Grace Period System**: Recently unbanned IPs receive a 30-minute grace period before auto-ban rules reapply
+- **Manual Override**: Administrators can manually ban/unban specific IPs via the admin API
+
+### Security Configuration
+The security system operates with the following default thresholds:
+- Max auth failures before ban: 5 attempts
+- Time window for tracking: 15 minutes
+- Permanent ban threshold: 15 total failures
+- Grace period for unbanned IPs: 30 minutes
+
+### Enhanced Error Handling
+The proxy system includes robust error handling for reliable communication:
+- **Serialization Protection**: Automatic detection and recovery from object stream corruption
+- **Response Size Limits**: 50MB limit to prevent oversized responses from causing issues
+- **Socket Health Monitoring**: Intelligent connection health checks without stream interference
+- **Detailed Error Logging**: Comprehensive error classification and troubleshooting information
 
 ## Debugging and Troubleshooting
 
