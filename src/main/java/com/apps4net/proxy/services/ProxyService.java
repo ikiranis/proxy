@@ -59,13 +59,17 @@ public class ProxyService {
             socketServerStarted = true;
             new Thread(() -> {
                 try (ServerSocket serverSocket = new ServerSocket(5000)) {
+                    Logger.info("Socket server started on port 5000 for proxy client connections");
+                    Logger.info("Note: This port is for Java clients only.");
                     while (true) {
                         Socket clientSocket = serverSocket.accept();
+                        Logger.info("New connection from " + clientSocket.getRemoteSocketAddress());
                         ClientHandler handler = new ClientHandler(clientSocket, clients);
                         handler.start();
                     }
                 } catch (IOException e) {
                     Logger.error("Socket server error", e);
+                    socketServerStarted = false; // Allow restart on next service creation
                 }
             }).start();
         }
