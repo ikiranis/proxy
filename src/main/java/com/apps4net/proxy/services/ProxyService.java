@@ -1,6 +1,8 @@
 package com.apps4net.proxy.services;
 
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Value;
+import jakarta.annotation.PostConstruct;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.Map;
 import java.net.ServerSocket;
@@ -31,14 +33,31 @@ import com.apps4net.proxy.utils.Logger;
 public class ProxyService {
     private final Map<String, ClientHandler> clients = new ConcurrentHashMap<>();
     private static boolean socketServerStarted = false;
+    
+    @Value("${proxy.auth.token}")
+    private String authToken;
+    
+    @Value("${proxy.socket.port:5000}")
+    private int socketPort;
 
     /**
-     * Constructs a new ProxyService and ensures the socket server is started.
+     * Constructs a new ProxyService.
      * 
-     * The socket server initialization is thread-safe and will only occur once
-     * across all instances of this service.
+     * Socket server initialization is deferred to @PostConstruct to ensure
+     * all Spring @Value properties are properly injected first.
      */
     public ProxyService() {
+        // Socket server will be started in initializeService() after dependency injection
+    }
+
+    /**
+     * Initializes the service after Spring dependency injection is complete.
+     * 
+     * This method is called automatically by Spring after all @Value properties
+     * have been injected, ensuring the socket server starts with correct configuration.
+     */
+    @PostConstruct
+    public void initializeService() {
         startSocketServerOnce();
     }
 
@@ -57,21 +76,64 @@ public class ProxyService {
     private synchronized void startSocketServerOnce() {
         if (!socketServerStarted) {
             socketServerStarted = true;
+            Logger.info("=== SOCKET SERVER INITIALIZATION ===");
+            Logger.info("Starting socket server on port " + socketPort);
+            Logger.info("Authentication token configured: " + (authToken != null && !authToken.trim().isEmpty() ? "YES" : "NO"));
+            
             new Thread(() -> {
-                try (ServerSocket serverSocket = new ServerSocket(5000)) {
-                    Logger.info("Socket server started on port 5000 for proxy client connections");
-                    Logger.info("Note: This port is for Java clients only.");
+                try (ServerSocket serverSocket = new ServerSocket(socketPort)) {
+                    Logger.info("=== SOCKET SERVER STARTED SUCCESSFULLY ===");
+                    Logger.info("Listening on port " + socketPort + " for proxy client connections");
+                    Logger.info("Server socket bound to: " + serverSocket.getLocalSocketAddress());
+                    Logger.info("Socket server is ready to accept connections");
+                    Logger.info("Note: This port is for authenticated Java clients only");
+                    Logger.info("==========================================");
+                    
                     while (true) {
+                        Logger.info("Waiting for client connections...");
                         Socket clientSocket = serverSocket.accept();
-                        Logger.info("New connection from " + clientSocket.getRemoteSocketAddress());
-                        ClientHandler handler = new ClientHandler(clientSocket, clients);
+                        String clientAddress = clientSocket.getRemoteSocketAddress().toString();
+                        Logger.info("=== NEW CLIENT CONNECTION ===");
+                        Logger.info("Connection from: " + clientAddress);
+                        Logger.info("Local socket: " + clientSocket.getLocalSocketAddress());
+                        Logger.info("Connection established at: " + java.time.LocalDateTime.now());
+                        Logger.info("Starting ClientHandler thread...");
+                        
+                        ClientHandler handler = new ClientHandler(clientSocket, clients, authToken);
                         handler.start();
+                        
+                        Logger.info("ClientHandler thread started for: " + clientAddress);
+                        Logger.info("=============================");
                     }
                 } catch (IOException e) {
-                    Logger.error("Socket server error", e);
+                    Logger.error("=== SOCKET SERVER ERROR ===");
+                    Logger.error("Failed to start or maintain socket server on port " + socketPort);
+                    Logger.error("Error details: " + e.getMessage());
+                    Logger.error("Error type: " + e.getClass().getSimpleName());
+                    
+                    if (e.getMessage() != null && e.getMessage().contains("Address already in use")) {
+                        Logger.error("DIAGNOSIS: Port " + socketPort + " is already in use");
+                        Logger.error("SOLUTIONS:");
+                        Logger.error("  1. Check if another proxy server instance is running");
+                        Logger.error("  2. Check for other applications using port " + socketPort);
+                        Logger.error("  3. Use 'netstat -ln | grep " + socketPort + "' to see what's using the port");
+                        Logger.error("  4. Change the port in application.properties: proxy.socket.port=<new-port>");
+                    } else if (e.getMessage() != null && e.getMessage().contains("Permission denied")) {
+                        Logger.error("DIAGNOSIS: Permission denied - cannot bind to port " + socketPort);
+                        Logger.error("SOLUTIONS:");
+                        Logger.error("  1. Use a port number > 1024 (non-privileged port)");
+                        Logger.error("  2. Run with sudo if port < 1024 is required");
+                        Logger.error("  3. Check firewall settings");
+                    }
+                    
+                    Logger.error("Socket server will be marked as failed");
+                    Logger.error("Full stack trace:", e);
+                    Logger.error("===========================");
                     socketServerStarted = false; // Allow restart on next service creation
                 }
-            }).start();
+            }, "ProxyServer-SocketListener").start();
+        } else {
+            Logger.info("Socket server already started - skipping initialization");
         }
     }
 

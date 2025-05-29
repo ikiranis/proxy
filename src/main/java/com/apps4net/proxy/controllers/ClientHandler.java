@@ -7,6 +7,12 @@ import com.apps4net.proxy.shared.ProxyResponse;
 import com.apps4net.proxy.utils.Logger;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
+import java.io.BufferedInputStream;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.time.LocalDateTime;
+import java.time.temporal.ChronoUnit;
 
 /**
  * Handles communication with individual proxy clients connected via socket connections.
@@ -27,19 +33,33 @@ import java.io.ObjectOutputStream;
 public class ClientHandler extends Thread {
     private final Socket socket;
     private final Map<String, ClientHandler> clients;
+    private final String requiredAuthToken;
     private String clientName;
     private ObjectOutputStream objectOut;
     private ObjectInputStream objectIn;
+    
+    // Threat Detection and IP Banning System
+    private static final Set<String> bannedIPs = ConcurrentHashMap.newKeySet();
+    private static final Map<String, AtomicInteger> suspiciousAttempts = new ConcurrentHashMap<>();
+    private static final Map<String, LocalDateTime> firstAttemptTime = new ConcurrentHashMap<>();
+    private static final Map<String, LocalDateTime> lastAttemptTime = new ConcurrentHashMap<>();
+    
+    // Threat detection thresholds
+    private static final int MAX_ATTEMPTS_BEFORE_BAN = 3;  // Ban after 3 suspicious attempts
+    private static final int TIME_WINDOW_MINUTES = 10;     // Within 10 minutes
+    private static final int PERMANENT_BAN_THRESHOLD = 10; // Permanent ban after 10 total attempts
 
     /**
      * Creates a new ClientHandler for managing communication with a connected client.
      * 
      * @param socket the socket connection to the client
      * @param clients the shared map of all connected clients for registration management
+     * @param authToken the required authentication token for client verification
      */
-    public ClientHandler(Socket socket, Map<String, ClientHandler> clients) {
+    public ClientHandler(Socket socket, Map<String, ClientHandler> clients, String authToken) {
         this.socket = socket;
         this.clients = clients;
+        this.requiredAuthToken = authToken;
     }
 
     /**
@@ -57,56 +77,183 @@ public class ClientHandler extends Thread {
      * {@link #sendRequestAndGetResponse(ProxyRequest)} method.
      */
     public void run() {
+        String clientIP = extractClientIP();
+        
+        Logger.info("=== CLIENT HANDLER STARTED ===");
+        Logger.info("Handling connection from: " + clientIP);
+        Logger.info("Socket details: " + socket);
+        Logger.info("Thread: " + Thread.currentThread().getName());
+        Logger.info("Timestamp: " + java.time.LocalDateTime.now());
+        
+        // SECURITY: Check if IP is banned before processing any requests
+        if (isBannedIP(clientIP)) {
+            Logger.info("SECURITY: Rejected connection from banned IP: " + clientIP);
+            Logger.info("Connection will be closed immediately");
+            try { socket.close(); } catch (Exception ignored) {}
+            Logger.info("=== CLIENT HANDLER ENDED (BANNED IP) ===");
+            return;
+        }
+        
+        Logger.info("IP security check passed for: " + clientIP);
+        
         try {
+            Logger.info("Initializing protocol detection...");
+            // Wrap the socket input stream in a BufferedInputStream which supports mark/reset
+            BufferedInputStream bufferedInput = new BufferedInputStream(socket.getInputStream());
+            
             // First, detect if this is an HTTP request by reading the first few bytes
-            socket.getInputStream().mark(4);
-            byte[] buffer = new byte[4];
-            int bytesRead = socket.getInputStream().read(buffer);
+            Logger.info("Reading first bytes to detect protocol...");
+            bufferedInput.mark(8);
+            byte[] buffer = new byte[8];
+            int bytesRead = bufferedInput.read(buffer);
+            Logger.info("Read " + bytesRead + " bytes for protocol detection");
             
             if (bytesRead >= 3) {
-                String header = new String(buffer, 0, Math.min(bytesRead, 4));
+                String header = new String(buffer, 0, Math.min(bytesRead, 8));
+                Logger.info("Protocol detection header: '" + header + "'");
+                
                 if (header.startsWith("GET") || header.startsWith("POST") || 
                     header.startsWith("PUT") || header.startsWith("HEAD") || 
                     header.startsWith("DELE") || header.startsWith("OPTI")) {
                     
-                    // This is an HTTP request, not a proxy client
+                    // This is an HTTP request, not a proxy client - SUSPICIOUS!
+                    Logger.info("THREAT DETECTED: HTTP request from " + clientIP + " to socket port (port scanning/vulnerability probe)");
+                    recordSuspiciousActivity(clientIP, "HTTP_REQUEST_TO_SOCKET_PORT");
                     handleHttpRequest();
+                    Logger.info("=== CLIENT HANDLER ENDED (HTTP THREAT) ===");
                     return;
                 }
             }
             
+            Logger.info("Protocol detection complete - appears to be Java object stream");
             // Reset the stream to the beginning for normal object stream processing
-            socket.getInputStream().reset();
+            bufferedInput.reset();
+            Logger.info("Stream reset for object communication");
             
             // Initialize object streams for proxy client communication
+            Logger.info("Creating ObjectOutputStream...");
             objectOut = new ObjectOutputStream(socket.getOutputStream());
-            objectIn = new ObjectInputStream(socket.getInputStream());
+            Logger.info("Creating ObjectInputStream...");
+            objectIn = new ObjectInputStream(bufferedInput);
+            Logger.info("Object streams created successfully");
             
-            // First message from client should be its name
+            // First message from client should be the authentication token
+            Logger.info("Waiting for authentication token from client...");
+            String clientToken = (String) objectIn.readObject();
+            Logger.info("Received authentication token from " + clientIP);
+            Logger.info("Token length: " + (clientToken != null ? clientToken.length() : 0) + " characters");
+            
+            // Verify authentication token
+            Logger.info("Validating authentication token...");
+            Logger.info("Expected token length: " + (requiredAuthToken != null ? requiredAuthToken.length() : 0));
+            Logger.info("Received token preview: " + (clientToken != null ? clientToken.substring(0, Math.min(10, clientToken.length())) + "..." : "null"));
+            
+            if (requiredAuthToken == null || !requiredAuthToken.equals(clientToken)) {
+                Logger.error("SECURITY: Authentication failed from " + clientIP + " - invalid token");
+                Logger.error("Expected token: " + (requiredAuthToken != null ? requiredAuthToken.substring(0, Math.min(10, requiredAuthToken.length())) + "..." : "null"));
+                Logger.error("Received token: " + (clientToken != null ? clientToken.substring(0, Math.min(10, clientToken.length())) + "..." : "null"));
+                recordSuspiciousActivity(clientIP, "AUTHENTICATION_FAILED");
+                
+                // Send authentication failure response
+                Logger.info("Sending AUTH_FAILED response to client");
+                objectOut.writeObject("AUTH_FAILED");
+                objectOut.flush();
+                Logger.info("=== CLIENT HANDLER ENDED (AUTH FAILED) ===");
+                return;
+            }
+            
+            Logger.info("Authentication successful for " + clientIP);
+            // Send authentication success response
+            Logger.info("Sending AUTH_SUCCESS response to client");
+            objectOut.writeObject("AUTH_SUCCESS");
+            objectOut.flush();
+            Logger.info("Authentication response sent successfully");
+            
+            // Second message from client should be its name
+            Logger.info("Waiting for client name...");
             clientName = (String) objectIn.readObject();
+            Logger.info("Received client name: '" + clientName + "' from " + clientIP);
+            
+            // Register client in the clients map
+            Logger.info("Registering client in connection pool...");
             clients.put(clientName, this);
-            Logger.info("Client '" + clientName + "' connected.");
+            Logger.info("Client registration successful");
+            
+            Logger.info("=== CLIENT CONNECTION ESTABLISHED ===");
+            Logger.info("Client Name: " + clientName);
+            Logger.info("Client IP: " + clientIP);
+            Logger.info("Total connected clients: " + clients.size());
+            Logger.info("======================================");
             
             // No request/response loop here; handled by sendRequestAndGetResponse
             // Just keep the thread alive until socket closes
+            Logger.info("Client '" + clientName + "' is ready to receive requests");
             while (!socket.isClosed()) {
                 try {
                     Thread.sleep(1000);
                 } catch (InterruptedException ignored) {}
             }
+            
+            Logger.info("Socket closed for client '" + clientName + "' from " + clientIP);
         } catch (java.io.StreamCorruptedException e) {
             // Handle the specific case where someone tries to send HTTP to the socket port
+            Logger.error("=== STREAM CORRUPTION DETECTED ===");
+            Logger.error("Client IP: " + clientIP);
+            Logger.error("Error message: " + e.getMessage());
             if (e.getMessage() != null && e.getMessage().contains("invalid stream header")) {
-                Logger.error("Invalid protocol detected - HTTP request sent to socket server port");
+                Logger.info("THREAT DETECTED: Invalid protocol from " + clientIP + " (likely HTTP to socket port)");
+                recordSuspiciousActivity(clientIP, "INVALID_PROTOCOL_STREAM_CORRUPTION");
                 handleHttpRequest();
             } else {
-                Logger.error("Stream corruption error", e);
+                Logger.info("THREAT DETECTED: Stream corruption from " + clientIP);
+                recordSuspiciousActivity(clientIP, "STREAM_CORRUPTION");
             }
+            Logger.error("=== END STREAM CORRUPTION ===");
+        } catch (java.io.IOException e) {
+            Logger.error("=== I/O ERROR DETECTED ===");
+            Logger.error("Client IP: " + clientIP);
+            Logger.error("Error type: " + e.getClass().getSimpleName());
+            Logger.error("Error message: " + e.getMessage());
+            if (e.getMessage() != null && e.getMessage().contains("mark/reset not supported")) {
+                Logger.info("THREAT DETECTED: HTTP request from " + clientIP + " (fallback detection)");
+                recordSuspiciousActivity(clientIP, "HTTP_REQUEST_FALLBACK_DETECTION");
+                handleHttpRequest();
+            } else {
+                Logger.info("Connection from " + clientIP + " closed during protocol detection");
+            }
+            Logger.error("=== END I/O ERROR ===");
+        } catch (ClassNotFoundException e) {
+            Logger.error("=== CLASS NOT FOUND ERROR ===");
+            Logger.error("Client IP: " + clientIP);
+            Logger.error("This suggests version mismatch between client and server");
+            Logger.error("Missing class: " + e.getMessage());
+            Logger.error("=== END CLASS NOT FOUND ERROR ===");
+            recordSuspiciousActivity(clientIP, "CLASS_NOT_FOUND_VERSION_MISMATCH");
         } catch (Exception e) {
-            Logger.error("Client handler error", e);
+            Logger.error("=== UNEXPECTED ERROR ===");
+            Logger.error("Client IP: " + clientIP);
+            Logger.error("Error type: " + e.getClass().getSimpleName());
+            Logger.error("Error message: " + e.getMessage());
+            Logger.error("Full stack trace:", e);
+            Logger.error("=== END UNEXPECTED ERROR ===");
+            recordSuspiciousActivity(clientIP, "CONNECTION_TERMINATED_UNEXPECTEDLY");
         } finally {
-            if (clientName != null) clients.remove(clientName);
-            try { socket.close(); } catch (java.io.IOException ignored) {}
+            Logger.info("=== CLIENT HANDLER CLEANUP ===");
+            Logger.info("Cleaning up connection for: " + clientIP);
+            if (clientName != null) {
+                Logger.info("Removing client '" + clientName + "' from connection pool");
+                clients.remove(clientName);
+                Logger.info("Client removed. Remaining clients: " + clients.size());
+            } else {
+                Logger.info("No client name to remove (connection failed before registration)");
+            }
+            try { 
+                socket.close(); 
+                Logger.info("Socket closed successfully");
+            } catch (java.io.IOException e) {
+                Logger.error("Error closing socket: " + e.getMessage());
+            }
+            Logger.info("=== CLIENT HANDLER ENDED ===");
         }
     }
 
@@ -156,7 +303,7 @@ public class ClientHandler extends Thread {
                 "\r\n" +
                 "{\n" +
                 "  \"error\": \"Invalid Protocol\",\n" +
-                "  \"message\": \"This port is for proxy client connections only.\",\n" +
+                "  \"message\": \"This port is for proxy client connections only.\"\n" +
                 "}\n";
             
             socket.getOutputStream().write(httpResponse.getBytes());
@@ -164,6 +311,135 @@ public class ClientHandler extends Thread {
             Logger.info("Responded to HTTP request with protocol error message");
         } catch (Exception e) {
             Logger.error("Failed to send HTTP error response", e);
+        }
+    }
+
+    /**
+     * Extracts the client IP address from the socket connection.
+     * 
+     * @return the client IP address as a string
+     */
+    private String extractClientIP() {
+        try {
+            return socket.getInetAddress().getHostAddress();
+        } catch (Exception e) {
+            Logger.error("Failed to extract client IP", e);
+            return "unknown";
+        }
+    }
+
+    /**
+     * Checks if an IP address is currently banned.
+     * 
+     * @param ip the IP address to check
+     * @return true if the IP is banned, false otherwise
+     */
+    private boolean isBannedIP(String ip) {
+        return bannedIPs.contains(ip);
+    }
+
+    /**
+     * Records suspicious activity from an IP address and implements automatic banning.
+     * 
+     * This method tracks suspicious activities and automatically bans IPs that:
+     * - Exceed MAX_ATTEMPTS_BEFORE_BAN within TIME_WINDOW_MINUTES
+     * - Reach PERMANENT_BAN_THRESHOLD total attempts across all time
+     * 
+     * @param ip the IP address performing suspicious activity
+     * @param activity the type of suspicious activity detected
+     */
+    private void recordSuspiciousActivity(String ip, String activity) {
+        LocalDateTime now = LocalDateTime.now();
+        
+        // Update attempt counters
+        AtomicInteger attempts = suspiciousAttempts.computeIfAbsent(ip, k -> new AtomicInteger(0));
+        int currentAttempts = attempts.incrementAndGet();
+        
+        // Track timing
+        firstAttemptTime.putIfAbsent(ip, now);
+        lastAttemptTime.put(ip, now);
+        
+        Logger.info("SECURITY: Suspicious activity from " + ip + " - " + activity + " (attempt #" + currentAttempts + ")");
+        
+        // Check for immediate ban conditions
+        LocalDateTime firstAttempt = firstAttemptTime.get(ip);
+        long minutesSinceFirst = ChronoUnit.MINUTES.between(firstAttempt, now);
+        
+        // Ban if too many attempts in time window
+        if (currentAttempts >= MAX_ATTEMPTS_BEFORE_BAN && minutesSinceFirst <= TIME_WINDOW_MINUTES) {
+            bannedIPs.add(ip);
+            Logger.info("SECURITY: IP " + ip + " BANNED for " + currentAttempts + " suspicious attempts within " + minutesSinceFirst + " minutes");
+        }
+        
+        // Permanent ban for persistent attackers
+        if (currentAttempts >= PERMANENT_BAN_THRESHOLD) {
+            bannedIPs.add(ip);
+            Logger.info("SECURITY: IP " + ip + " PERMANENTLY BANNED for reaching " + currentAttempts + " total suspicious attempts");
+        }
+        
+        // Clean up old tracking data for IPs that haven't been active recently
+        cleanupOldTrackingData();
+    }
+
+    /**
+     * Cleans up tracking data for IPs that haven't been active in the last 24 hours.
+     * This prevents memory leaks from accumulating data for old attackers.
+     */
+    private void cleanupOldTrackingData() {
+        LocalDateTime cutoff = LocalDateTime.now().minusHours(24);
+        
+        lastAttemptTime.entrySet().removeIf(entry -> {
+            if (entry.getValue().isBefore(cutoff)) {
+                String ip = entry.getKey();
+                suspiciousAttempts.remove(ip);
+                firstAttemptTime.remove(ip);
+                // Don't remove from bannedIPs - those are permanent
+                return true;
+            }
+            return false;
+        });
+    }
+
+    /**
+     * Gets the current set of banned IPs for monitoring purposes.
+     * 
+     * @return a copy of the banned IPs set
+     */
+    public static Set<String> getBannedIPs() {
+        return Set.copyOf(bannedIPs);
+    }
+
+    /**
+     * Gets the current suspicious activity statistics for monitoring.
+     * 
+     * @return a copy of the suspicious attempts map
+     */
+    public static Map<String, Integer> getSuspiciousAttempts() {
+        return suspiciousAttempts.entrySet().stream()
+            .collect(java.util.stream.Collectors.toMap(
+                Map.Entry::getKey,
+                entry -> entry.getValue().get()
+            ));
+    }
+
+    /**
+     * Manually bans an IP address (for administrative purposes).
+     * 
+     * @param ip the IP address to ban
+     */
+    public static void banIP(String ip) {
+        bannedIPs.add(ip);
+        Logger.info("SECURITY: IP " + ip + " manually banned by administrator");
+    }
+
+    /**
+     * Manually unbans an IP address (for administrative purposes).
+     * 
+     * @param ip the IP address to unban
+     */
+    public static void unbanIP(String ip) {
+        if (bannedIPs.remove(ip)) {
+            Logger.info("SECURITY: IP " + ip + " manually unbanned by administrator");
         }
     }
 }

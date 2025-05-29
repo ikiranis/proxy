@@ -30,7 +30,9 @@ import com.apps4net.proxy.utils.Logger;
  * java -jar proxy-0.1.jar client
  * 
  * // Client mode with custom parameters
- * java -jar proxy-0.1.jar client my-client-name server.example.com 5000
+ * java -jar proxy-0.1.jar client my-client-name server.example.com 5000 my-auth-token
+ * 
+ * Note: Authentication token must match the server's proxy.auth.token configuration
  * 
  * @author Apps4Net
  * @version 1.0
@@ -62,17 +64,60 @@ public class ProxyApplication {
 			String clientName = (args.length > 1) ? args[1] : "default-client";
 			String serverHost = (args.length > 2) ? args[2] : "localhost";
 			int serverPort = (args.length > 3) ? Integer.parseInt(args[3]) : 5000;
-			Logger.info("Starting in CLIENT mode as '" + clientName + "' connecting to " + serverHost + ":" + serverPort);
+			String authToken = (args.length > 4) ? args[4] : "apps4net-proxy-secure-token-2025";
 			
-			ProxyClient client = new ProxyClient(clientName, serverHost, serverPort);
+			Logger.info("=====================================");
+			Logger.info("    PROXY CLIENT STARTING");
+			Logger.info("=====================================");
+			Logger.info("Client Name: " + clientName);
+			Logger.info("Server Host: " + serverHost);
+			Logger.info("Server Port: " + serverPort);
+			Logger.info("Auth Token: " + (authToken != null ? "***configured***" : "none"));
+			Logger.info("=====================================");
+			
+			// Validate basic configuration before starting
+			if (serverHost == null || serverHost.trim().isEmpty()) {
+				Logger.error("CONFIGURATION ERROR: Server host cannot be empty");
+				Logger.error("Usage: java -jar proxy.jar client [client-name] [server-host] [server-port] [auth-token]");
+				return;
+			}
+			
+			if (serverPort <= 0 || serverPort > 65535) {
+				Logger.error("CONFIGURATION ERROR: Invalid port number: " + serverPort);
+				Logger.error("Port must be between 1 and 65535");
+				return;
+			}
+			
+			if (authToken == null || authToken.trim().isEmpty()) {
+				Logger.error("CONFIGURATION ERROR: Authentication token cannot be empty");
+				Logger.error("Token must match server's proxy.auth.token configuration");
+				return;
+			}
+			
+			Logger.info("Configuration validation passed - starting client...");
+			
+			ProxyClient client = new ProxyClient(clientName, serverHost, serverPort, authToken);
 			
 			// Add shutdown hook for graceful termination
 			Runtime.getRuntime().addShutdownHook(new Thread(() -> {
-				Logger.info("Shutting down client gracefully...");
+				Logger.info("=====================================");
+				Logger.info("    PROXY CLIENT SHUTTING DOWN");
+				Logger.info("=====================================");
+				Logger.info("Received shutdown signal, stopping client gracefully...");
 				client.stop();
+				Logger.info("Client shutdown complete");
 			}));
 			
-			client.start();
+			try {
+				client.start();
+			} catch (Exception e) {
+				Logger.error("FATAL ERROR: Client failed to start: " + e.getMessage(), e);
+				Logger.error("=====================================");
+				Logger.error("    CLIENT STARTUP FAILED");
+				Logger.error("=====================================");
+				Logger.error("Check the error messages above for troubleshooting guidance");
+				System.exit(1);
+			}
 			return;
 		}
 		// Default: server mode

@@ -3,9 +3,15 @@ spring.application.name=proxy
 # Port to run application on
 server.port=9990
 
-#server.ssl.enabled=true
-#server.address=0.0.0.0
-#server.ssl.key-store=classpath:<serverIP>.p12
-#server.ssl.key-store-password=changeit
-#server.ssl.keyStoreType=PKCS12
-#server.ssl.keyAlias=1
+# Security Configuration
+# Authentication token for client-server communication
+# IMPORTANT: Change this to a secure random string in production!
+proxy.auth.token=your-secure-token-here
+
+# Admin API key for administrative endpoints
+# IMPORTANT: Change this to a secure, randomly generated string in production!
+# This key is used to authenticate administrative API requests
+proxy.admin.api.key=your-secure-admin-key-here
+
+# Socket server configuration
+proxy.socket.port=5000
