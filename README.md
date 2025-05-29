@@ -97,8 +97,12 @@ Content-Type: application/json
 
 Available actions:
 - `ban`: Ban an IP address
-- `unban`: Remove an IP from the ban list
+- `unban`: Remove an IP from the ban list and clear all tracking data
 - `status`: Get current security status
+- `check`: Check the ban status and auto-ban criteria for a specific IP
+- `trust`: Add an IP to the trusted list (will never be auto-banned)
+- `untrust`: Remove an IP from the trusted list
+- `trusted`: List all currently trusted IPs
 
 #### Security Status (Authentication Required)
 ```
@@ -131,6 +135,14 @@ curl -X POST http://localhost:9999/api/admin/security \
   -H "Authorization: Bearer your-admin-api-key" \
   -H "Content-Type: application/json" \
   -d '{"action": "unban", "ip": "192.168.1.100"}'
+```
+
+**Check IP ban status and auto-ban criteria:**
+```bash
+curl -X POST http://localhost:9999/api/admin/security \
+  -H "Authorization: Bearer your-admin-api-key" \
+  -H "Content-Type: application/json" \
+  -d '{"action": "check", "ip": "192.168.1.100"}'
 ```
 
 **Get security status:**

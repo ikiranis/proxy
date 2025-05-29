@@ -250,9 +250,11 @@ public class GeneralController {
             
             // Configuration information
             Map<String, Object> config = new HashMap<>();
-            config.put("maxAttemptsBeforeBan", 3);
-            config.put("timeWindowMinutes", 10);
-            config.put("permanentBanThreshold", 10);
+            config.put("maxAttemptsBeforeBan", 5);
+            config.put("timeWindowMinutes", 15);
+            config.put("permanentBanThreshold", 15);
+            config.put("authFailureTolerance", 8);
+            config.put("gracePeriodMinutes", 30);
             securityInfo.put("configuration", config);
             
             // System status
@@ -339,11 +341,23 @@ public class GeneralController {
                         response.put("error", "Missing 'ip' parameter for unban action");
                         return ResponseEntity.badRequest().body(response);
                     }
-                    ClientHandler.unbanIP(ip.trim());
+                    
+                    // Check auto-ban status before unbanning
+                    Map<String, Object> preBanStatus = ClientHandler.checkAutoBanStatus(ip.trim());
+                    
+                    boolean wasUnbanned = ClientHandler.unbanIP(ip.trim());
                     response.put("success", true);
-                    response.put("message", "IP " + ip + " has been unbanned");
+                    if (wasUnbanned) {
+                        response.put("message", "IP " + ip + " has been successfully unbanned and tracking data cleared");
+                        response.put("wasActuallyBanned", true);
+                    } else {
+                        response.put("message", "IP " + ip + " was not in the banned list (may have already been unbanned)");
+                        response.put("wasActuallyBanned", false);
+                    }
                     response.put("action", "unban");
                     response.put("ip", ip);
+                    response.put("preBanStatus", preBanStatus);
+                    response.put("note", "All tracking data has been cleared. IP will not be auto-banned unless new suspicious activity occurs.");
                     break;
                     
                 case "status":
@@ -353,9 +367,21 @@ public class GeneralController {
                     response.put("action", "status");
                     break;
                     
+                case "check":
+                    if (ip == null || ip.trim().isEmpty()) {
+                        response.put("error", "Missing 'ip' parameter for check action");
+                        return ResponseEntity.badRequest().body(response);
+                    }
+                    response.put("success", true);
+                    response.put("action", "check");
+                    response.put("ip", ip);
+                    response.put("isBanned", ClientHandler.getBannedIPs().contains(ip.trim()));
+                    response.put("autoBanStatus", ClientHandler.checkAutoBanStatus(ip.trim()));
+                    break;
+                    
                 default:
                     response.put("error", "Invalid action: " + action);
-                    response.put("validActions", new String[]{"ban", "unban", "status"});
+                    response.put("validActions", new String[]{"ban", "unban", "status", "check"});
                     return ResponseEntity.badRequest().body(response);
             }
             

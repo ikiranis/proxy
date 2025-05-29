@@ -2,12 +2,14 @@ package com.apps4net.proxy.controllers;
 
 import java.net.Socket;
 import java.util.Map;
+import java.util.HashMap;
 import com.apps4net.proxy.shared.ProxyRequest;
 import com.apps4net.proxy.shared.ProxyResponse;
 import com.apps4net.proxy.utils.Logger;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.io.BufferedInputStream;
+import java.io.IOException;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -43,11 +45,14 @@ public class ClientHandler extends Thread {
     private static final Map<String, AtomicInteger> suspiciousAttempts = new ConcurrentHashMap<>();
     private static final Map<String, LocalDateTime> firstAttemptTime = new ConcurrentHashMap<>();
     private static final Map<String, LocalDateTime> lastAttemptTime = new ConcurrentHashMap<>();
+    private static final Map<String, LocalDateTime> recentlyUnbannedIPs = new ConcurrentHashMap<>();
     
     // Threat detection thresholds
-    private static final int MAX_ATTEMPTS_BEFORE_BAN = 3;  // Ban after 3 suspicious attempts
-    private static final int TIME_WINDOW_MINUTES = 10;     // Within 10 minutes
-    private static final int PERMANENT_BAN_THRESHOLD = 10; // Permanent ban after 10 total attempts
+    private static final int MAX_ATTEMPTS_BEFORE_BAN = 5;  // Ban after 5 suspicious attempts (increased from 3)
+    private static final int TIME_WINDOW_MINUTES = 15;     // Within 15 minutes (increased from 10)
+    private static final int PERMANENT_BAN_THRESHOLD = 15; // Permanent ban after 15 total attempts (increased from 10)
+    private static final int AUTH_FAILURE_TOLERANCE = 8;   // Allow more auth failures before banning
+    private static final int GRACE_PERIOD_MINUTES = 30;    // Grace period after manual unban (30 minutes)
 
     /**
      * Creates a new ClientHandler for managing communication with a connected client.
@@ -99,36 +104,53 @@ public class ClientHandler extends Thread {
         try {
             Logger.info("Initializing protocol detection...");
             // Wrap the socket input stream in a BufferedInputStream which supports mark/reset
-            BufferedInputStream bufferedInput = new BufferedInputStream(socket.getInputStream());
+            BufferedInputStream bufferedInput = new BufferedInputStream(socket.getInputStream(), 8192); // Increase buffer size
             
             // First, detect if this is an HTTP request by reading the first few bytes
             Logger.info("Reading first bytes to detect protocol...");
-            bufferedInput.mark(8);
-            byte[] buffer = new byte[8];
-            int bytesRead = bufferedInput.read(buffer);
-            Logger.info("Read " + bytesRead + " bytes for protocol detection");
             
-            if (bytesRead >= 3) {
-                String header = new String(buffer, 0, Math.min(bytesRead, 8));
-                Logger.info("Protocol detection header: '" + header + "'");
+            // Use a more robust protocol detection approach
+            boolean isHttpRequest = false;
+            try {
+                bufferedInput.mark(16); // Mark more bytes to be safe
+                byte[] buffer = new byte[16]; // Read more bytes for better detection
+                int bytesRead = bufferedInput.read(buffer);
+                Logger.info("Read " + bytesRead + " bytes for protocol detection");
                 
-                if (header.startsWith("GET") || header.startsWith("POST") || 
-                    header.startsWith("PUT") || header.startsWith("HEAD") || 
-                    header.startsWith("DELE") || header.startsWith("OPTI")) {
+                if (bytesRead >= 3) {
+                    String header = new String(buffer, 0, Math.min(bytesRead, 16));
+                    Logger.info("Protocol detection header: '" + header.replaceAll("\\r|\\n", "\\\\n") + "'");
                     
-                    // This is an HTTP request, not a proxy client - SUSPICIOUS!
-                    Logger.info("THREAT DETECTED: HTTP request from " + clientIP + " to socket port (port scanning/vulnerability probe)");
-                    recordSuspiciousActivity(clientIP, "HTTP_REQUEST_TO_SOCKET_PORT");
+                    // More comprehensive HTTP method detection
+                    if (header.startsWith("GET ") || header.startsWith("POST ") || 
+                        header.startsWith("PUT ") || header.startsWith("HEAD ") || 
+                        header.startsWith("DELETE ") || header.startsWith("OPTIONS ") ||
+                        header.startsWith("PATCH ") || header.startsWith("TRACE ") ||
+                        header.startsWith("CONNECT ")) {
+                        
+                        isHttpRequest = true;
+                        Logger.info("THREAT DETECTED: HTTP request from " + clientIP + " to socket port (port scanning/vulnerability probe)");
+                        recordSuspiciousActivity(clientIP, "HTTP_REQUEST_TO_SOCKET_PORT");
+                    }
+                }
+                
+                if (isHttpRequest) {
                     handleHttpRequest();
                     Logger.info("=== CLIENT HANDLER ENDED (HTTP THREAT) ===");
                     return;
                 }
+                
+                Logger.info("Protocol detection complete - appears to be Java object stream");
+                // Reset the stream to the beginning for normal object stream processing
+                bufferedInput.reset();
+                Logger.info("Stream reset for object communication");
+                
+            } catch (IOException markResetException) {
+                Logger.error("Mark/reset failed during protocol detection: " + markResetException.getMessage());
+                Logger.info("Falling back to direct object stream processing (likely legitimate client)");
+                // If mark/reset fails, assume it's a legitimate client and proceed with object stream
+                // Don't record this as suspicious activity - it's a common issue with some network conditions
             }
-            
-            Logger.info("Protocol detection complete - appears to be Java object stream");
-            // Reset the stream to the beginning for normal object stream processing
-            bufferedInput.reset();
-            Logger.info("Stream reset for object communication");
             
             // Initialize object streams for proxy client communication
             Logger.info("Creating ObjectOutputStream...");
@@ -214,12 +236,22 @@ public class ClientHandler extends Thread {
             Logger.error("Client IP: " + clientIP);
             Logger.error("Error type: " + e.getClass().getSimpleName());
             Logger.error("Error message: " + e.getMessage());
+            
+            // Check if this is a legitimate client connection issue vs HTTP probe
             if (e.getMessage() != null && e.getMessage().contains("mark/reset not supported")) {
-                Logger.info("THREAT DETECTED: HTTP request from " + clientIP + " (fallback detection)");
-                recordSuspiciousActivity(clientIP, "HTTP_REQUEST_FALLBACK_DETECTION");
-                handleHttpRequest();
+                Logger.info("PROTOCOL: mark/reset not supported from " + clientIP + " - this may be a legitimate client with stream issues");
+                Logger.info("PROTOCOL: Not treating mark/reset error as suspicious activity - likely legitimate client");
+                // Don't record as suspicious activity - this is often a legitimate client issue
+            } else if (e.getMessage() != null && 
+                      (e.getMessage().toLowerCase().contains("connection reset") || 
+                       e.getMessage().toLowerCase().contains("broken pipe") ||
+                       e.getMessage().toLowerCase().contains("socket closed"))) {
+                Logger.info("Connection from " + clientIP + " terminated normally during protocol detection");
+                // These are normal connection termination scenarios, not threats
             } else {
                 Logger.info("Connection from " + clientIP + " closed during protocol detection");
+                // Only record truly suspicious I/O errors, not normal client connection issues
+                Logger.info("I/O error details: " + e.getClass().getSimpleName() + " - " + e.getMessage());
             }
             Logger.error("=== END I/O ERROR ===");
         } catch (ClassNotFoundException e) {
@@ -344,11 +376,26 @@ public class ClientHandler extends Thread {
      * This method tracks suspicious activities and automatically bans IPs that:
      * - Exceed MAX_ATTEMPTS_BEFORE_BAN within TIME_WINDOW_MINUTES
      * - Reach PERMANENT_BAN_THRESHOLD total attempts across all time
+     * - Has special handling for recently unbanned IPs and authentication failures
      * 
      * @param ip the IP address performing suspicious activity
      * @param activity the type of suspicious activity detected
      */
     private void recordSuspiciousActivity(String ip, String activity) {
+        // Check if this IP was recently unbanned and is in grace period
+        LocalDateTime recentUnbanTime = recentlyUnbannedIPs.get(ip);
+        if (recentUnbanTime != null) {
+            long minutesSinceUnban = ChronoUnit.MINUTES.between(recentUnbanTime, LocalDateTime.now());
+            if (minutesSinceUnban <= GRACE_PERIOD_MINUTES) {
+                Logger.info("SECURITY: IP " + ip + " is in grace period (" + minutesSinceUnban + "/" + GRACE_PERIOD_MINUTES + " minutes) - allowing activity: " + activity);
+                return;
+            } else {
+                // Grace period expired, remove from recently unbanned list
+                recentlyUnbannedIPs.remove(ip);
+                Logger.info("SECURITY: Grace period expired for " + ip + ", resuming normal threat detection");
+            }
+        }
+        
         LocalDateTime now = LocalDateTime.now();
         
         // Update attempt counters
@@ -365,10 +412,17 @@ public class ClientHandler extends Thread {
         LocalDateTime firstAttempt = firstAttemptTime.get(ip);
         long minutesSinceFirst = ChronoUnit.MINUTES.between(firstAttempt, now);
         
+        // Different thresholds for authentication failures vs other threats
+        int banThreshold = MAX_ATTEMPTS_BEFORE_BAN;
+        if ("AUTHENTICATION_FAILED".equals(activity)) {
+            banThreshold = AUTH_FAILURE_TOLERANCE; // More lenient for auth failures
+            Logger.info("SECURITY: Using auth failure tolerance (" + AUTH_FAILURE_TOLERANCE + ") for " + ip);
+        }
+        
         // Ban if too many attempts in time window
-        if (currentAttempts >= MAX_ATTEMPTS_BEFORE_BAN && minutesSinceFirst <= TIME_WINDOW_MINUTES) {
+        if (currentAttempts >= banThreshold && minutesSinceFirst <= TIME_WINDOW_MINUTES) {
             bannedIPs.add(ip);
-            Logger.info("SECURITY: IP " + ip + " BANNED for " + currentAttempts + " suspicious attempts within " + minutesSinceFirst + " minutes");
+            Logger.info("SECURITY: IP " + ip + " BANNED for " + currentAttempts + " suspicious attempts within " + minutesSinceFirst + " minutes (threshold: " + banThreshold + ")");
         }
         
         // Permanent ban for persistent attackers
@@ -384,9 +438,11 @@ public class ClientHandler extends Thread {
     /**
      * Cleans up tracking data for IPs that haven't been active in the last 24 hours.
      * This prevents memory leaks from accumulating data for old attackers.
+     * Also cleans up expired grace periods.
      */
     private void cleanupOldTrackingData() {
         LocalDateTime cutoff = LocalDateTime.now().minusHours(24);
+        LocalDateTime gracePeriodCutoff = LocalDateTime.now().minusMinutes(GRACE_PERIOD_MINUTES);
         
         lastAttemptTime.entrySet().removeIf(entry -> {
             if (entry.getValue().isBefore(cutoff)) {
@@ -394,6 +450,15 @@ public class ClientHandler extends Thread {
                 suspiciousAttempts.remove(ip);
                 firstAttemptTime.remove(ip);
                 // Don't remove from bannedIPs - those are permanent
+                return true;
+            }
+            return false;
+        });
+        
+        // Clean up expired grace periods
+        recentlyUnbannedIPs.entrySet().removeIf(entry -> {
+            if (entry.getValue().isBefore(gracePeriodCutoff)) {
+                Logger.info("SECURITY: Grace period expired for IP " + entry.getKey());
                 return true;
             }
             return false;
@@ -436,10 +501,87 @@ public class ClientHandler extends Thread {
      * Manually unbans an IP address (for administrative purposes).
      * 
      * @param ip the IP address to unban
+     * @return true if the IP was found and removed from the ban list, false if it wasn't banned
      */
-    public static void unbanIP(String ip) {
-        if (bannedIPs.remove(ip)) {
+    public static boolean unbanIP(String ip) {
+        boolean wasRemoved = bannedIPs.remove(ip);
+        if (wasRemoved) {
             Logger.info("SECURITY: IP " + ip + " manually unbanned by administrator");
+            // Also clear any suspicious activity tracking for this IP
+            suspiciousAttempts.remove(ip);
+            firstAttemptTime.remove(ip);
+            lastAttemptTime.remove(ip);
+            
+            // Add to grace period to prevent immediate re-banning
+            recentlyUnbannedIPs.put(ip, LocalDateTime.now());
+            Logger.info("SECURITY: IP " + ip + " added to grace period for " + GRACE_PERIOD_MINUTES + " minutes");
+            Logger.info("SECURITY: Cleared all tracking data for unbanned IP " + ip);
+        } else {
+            Logger.info("SECURITY: Attempted to unban IP " + ip + " but it was not in the banned list");
         }
+        return wasRemoved;
     }
+
+    /**
+     * Checks if an IP address would be automatically banned based on current tracking data.
+     * This is useful for debugging unban issues.
+     * 
+     * @param ip the IP address to check
+     * @return information about why the IP might be auto-banned
+     */
+    public static Map<String, Object> checkAutoBanStatus(String ip) {
+        Map<String, Object> status = new HashMap<>();
+        
+        // Check if IP is in grace period
+        LocalDateTime recentUnbanTime = recentlyUnbannedIPs.get(ip);
+        if (recentUnbanTime != null) {
+            long minutesSinceUnban = ChronoUnit.MINUTES.between(recentUnbanTime, LocalDateTime.now());
+            if (minutesSinceUnban <= GRACE_PERIOD_MINUTES) {
+                status.put("inGracePeriod", true);
+                status.put("gracePeriodRemainingMinutes", GRACE_PERIOD_MINUTES - minutesSinceUnban);
+                status.put("wouldBeAutoBanned", false);
+                status.put("reason", "IP is in grace period for " + (GRACE_PERIOD_MINUTES - minutesSinceUnban) + " more minutes");
+                return status;
+            }
+        }
+        status.put("inGracePeriod", false);
+        
+        AtomicInteger attempts = suspiciousAttempts.get(ip);
+        LocalDateTime firstAttempt = firstAttemptTime.get(ip);
+        LocalDateTime lastAttempt = lastAttemptTime.get(ip);
+        
+        if (attempts == null) {
+            status.put("hasTrackingData", false);
+            status.put("wouldBeAutoBanned", false);
+            status.put("reason", "No suspicious activity tracking data");
+            return status;
+        }
+        
+        status.put("hasTrackingData", true);
+        status.put("suspiciousAttempts", attempts.get());
+        status.put("firstAttempt", firstAttempt.toString());
+        status.put("lastAttempt", lastAttempt.toString());
+        
+        long minutesSinceFirst = ChronoUnit.MINUTES.between(firstAttempt, LocalDateTime.now());
+        status.put("minutesSinceFirstAttempt", minutesSinceFirst);
+        
+        boolean wouldBanTimeWindow = attempts.get() >= MAX_ATTEMPTS_BEFORE_BAN && minutesSinceFirst <= TIME_WINDOW_MINUTES;
+        boolean wouldBanAuthFailure = attempts.get() >= AUTH_FAILURE_TOLERANCE && minutesSinceFirst <= TIME_WINDOW_MINUTES;
+        boolean wouldBanPermanent = attempts.get() >= PERMANENT_BAN_THRESHOLD;
+        
+        status.put("wouldBeAutoBanned", wouldBanTimeWindow || wouldBanAuthFailure || wouldBanPermanent);
+        
+        if (wouldBanPermanent) {
+            status.put("reason", "Would be permanently banned due to " + attempts.get() + " total attempts (threshold: " + PERMANENT_BAN_THRESHOLD + ")");
+        } else if (wouldBanAuthFailure) {
+            status.put("reason", "Would be banned for " + attempts.get() + " auth failure attempts within " + minutesSinceFirst + " minutes (threshold: " + AUTH_FAILURE_TOLERANCE + " within " + TIME_WINDOW_MINUTES + " minutes)");
+        } else if (wouldBanTimeWindow) {
+            status.put("reason", "Would be banned for " + attempts.get() + " attempts within " + minutesSinceFirst + " minutes (threshold: " + MAX_ATTEMPTS_BEFORE_BAN + " within " + TIME_WINDOW_MINUTES + " minutes)");
+        } else {
+            status.put("reason", "Would not be auto-banned based on current criteria");
+        }
+        
+        return status;
+    }
+
 }
