@@ -4,12 +4,14 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.CrossOrigin;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.HttpStatus;
 import org.springframework.beans.factory.annotation.Autowired;
 import com.apps4net.proxy.services.ProxyService;
 import com.apps4net.proxy.shared.ProxyRequest;
 import com.apps4net.proxy.shared.ProxyResponse;
+import com.apps4net.proxy.utils.ServerUtils;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.Map;
@@ -30,6 +32,7 @@ import java.util.HashMap;
  * @since 1.0
  */
 @RestController
+@CrossOrigin(origins = "*", maxAge = 3600)
 public class GeneralController {
     private final ProxyService proxyService;
 
@@ -64,6 +67,7 @@ public class GeneralController {
      * @see ProxyRequest
      * @see ProxyResponse
      */
+    @CrossOrigin(origins = "*")
     @PostMapping(path = "/api/forward", consumes = "application/json", produces = "application/json")
     public ResponseEntity<?> forwardToClient(@RequestBody ProxyRequest proxyRequest) {
         // Check if client is connected before forwarding the request
@@ -132,6 +136,7 @@ public class GeneralController {
      * 
      * @since 1.0
      */
+    @CrossOrigin(origins = "*")
     @GetMapping(path = "/api/health", produces = "application/json")
     public ResponseEntity<Map<String, Object>> healthCheck() {
         Map<String, Object> healthInfo = new HashMap<>();
@@ -145,7 +150,7 @@ public class GeneralController {
             healthInfo.put("version", "1.0");
             healthInfo.put("socketServerRunning", true); // Socket server is started in ProxyService constructor
             healthInfo.put("connectedClients", connectedClients);
-            healthInfo.put("uptime", getServerUptime());
+            healthInfo.put("uptime", ServerUtils.getServerUptime());
             
             // Check if any clients are connected
             if (connectedClients == 0) {
@@ -174,30 +179,4 @@ public class GeneralController {
             return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(healthInfo);
         }
     }
-
-    /**
-     * Gets the server uptime information.
-     * 
-     * This method calculates how long the server has been running since startup.
-     * It provides a simple uptime metric for monitoring purposes.
-     * 
-     * @return a string describing the server uptime
-     */
-    private String getServerUptime() {
-        long uptimeMs = System.currentTimeMillis() - startTime;
-        long seconds = uptimeMs / 1000;
-        long minutes = seconds / 60;
-        long hours = minutes / 60;
-        
-        if (hours > 0) {
-            return String.format("%d hours, %d minutes", hours, minutes % 60);
-        } else if (minutes > 0) {
-            return String.format("%d minutes, %d seconds", minutes, seconds % 60);
-        } else {
-            return String.format("%d seconds", seconds);
-        }
-    }
-    
-    // Track server start time for uptime calculation
-    private static final long startTime = System.currentTimeMillis();
 }
