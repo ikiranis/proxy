@@ -18,6 +18,47 @@ This application acts as a proxy between HTTP clients and internal clients conne
   - Registers itself with a unique client name (sent as the first object).
   - Waits for `ProxyRequest` objects from the server, processes them (performs the API call in its LAN), and sends back `ProxyResponse` objects.
 
+## Client Mode Features
+
+### Automatic Reconnection
+The proxy client includes robust reconnection capabilities:
+- **Automatic Retry**: Attempts to reconnect every 5 seconds when connection is lost
+- **Heartbeat Monitoring**: Sends health checks every 30 seconds to maintain connection
+- **Connection Health Detection**: Automatically detects and recovers from connection issues
+- **External Control**: Supports external `forceReconnect()` and status checking via `isRunning()`
+
+### Enhanced Connection Management
+- **Socket Health Monitoring**: Comprehensive connection testing without interfering with data streams
+- **Zombie Connection Prevention**: Automatic detection and cleanup of unhealthy connections
+- **Timeout Handling**: 30-second socket timeouts with intelligent error recovery
+- **Connection Validation**: Pre-request health checks ensure reliable communication
+
+### Improved Error Handling
+- **Connection Classification**: Detailed analysis of connection failures with specific solutions
+- **Stream Corruption Recovery**: Automatic detection and recovery from object serialization issues
+- **Timeout Management**: Intelligent handling of socket timeouts and network delays
+- **Debug Information**: Comprehensive logging for troubleshooting connection issues
+
+## Server Mode Features
+
+### Enhanced Health Monitoring
+- **Real-time Client Tracking**: Monitor all connected clients by name and status
+- **Connection Health Checks**: Automatic validation of client connections before forwarding requests
+- **Zombie Connection Cleanup**: Automatic removal of unhealthy or abandoned connections
+- **Administrative Cleanup**: Manual connection cleanup via admin API endpoints
+
+### Advanced Connection Management
+- **Client Name Resolution**: Track and manage clients by their registered names
+- **Connection Lifecycle Management**: Proper handling of client connect/disconnect events
+- **Health Status Reporting**: Detailed health information including client lists and connection counts
+- **Automatic Cleanup**: Intelligent removal of failed connections during normal operations
+
+### Timeout and Error Handling
+- **Configurable Timeouts**: 30-second socket timeouts for reliable communication
+- **Error Classification**: Detailed analysis of communication failures with appropriate responses
+- **Response Size Limits**: 50MB response size limits to prevent resource exhaustion
+- **Graceful Degradation**: Continued operation even when individual client connections fail
+
 ## Usage
 
 ### Build the Application
@@ -114,7 +155,36 @@ Returns information about banned IPs, threat detection statistics, and security 
 GET /api/health
 ```
 
-Returns server health information including connected clients and uptime.
+Returns comprehensive server health information including:
+- Server status and uptime
+- Total number of connected clients
+- List of connected client names (`connectedClientNames`)
+- Connection health status
+
+**Example Response:**
+```json
+{
+  "status": "OK",
+  "uptime": "2 days, 14 hours, 32 minutes",
+  "connectedClients": 3,
+  "connectedClientNames": ["client1", "client2", "client3"],
+  "timestamp": "2025-01-20T10:30:15Z"
+}
+```
+
+#### Connection Management (Authentication Required)
+```
+POST /api/cleanup-connections
+Authorization: Bearer your-admin-api-key
+```
+
+Manually triggers cleanup of unhealthy or zombie connections. The server automatically performs this cleanup during normal operations, but this endpoint allows for manual intervention when needed.
+
+**Example:**
+```bash
+curl -X POST http://localhost:9999/api/cleanup-connections \
+  -H "Authorization: Bearer your-admin-api-key"
+```
 
 ### Example Admin Requests
 
@@ -156,13 +226,25 @@ curl -X POST http://localhost:9999/api/forward \
   -d '{"clientName": "myClient", "httpMethodType": "GET", "url": "http://lan-server/api", "body": ""}'
 ```
 
+**Check server health:**
+```bash
+curl -X GET http://localhost:9999/api/health
+```
+
+**Cleanup unhealthy connections:**
+```bash
+curl -X POST http://localhost:9999/api/cleanup-connections \
+  -H "Authorization: Bearer your-admin-api-key"
+```
+
 ## Project Structure
 
 - `ProxyApplication.java`: Main entry point, handles mode selection.
 - `ProxyClient.java`: Client mode logic.
 - `controllers/GeneralController.java`: REST API controller.
-- `controllers/ClientHandler.java`: Handles socket communication with a client.
-- `services/ProxyService.java`: Business logic and socket server for server mode.
+- `controllers/ClientHandler.java`: Handles socket communication with clients, includes 30-second timeout handling and connection health monitoring.
+- `services/ProxyService.java`: Business logic, socket server management, client health tracking, and connection cleanup for server mode.
+- `utils/Logger.java`: Enhanced logging utility with debug support and detailed error analysis.
 - `shared/ProxyRequest.java`, `shared/ProxyResponse.java`: Serializable request/response objects for robust communication.
 
 ## Security System
@@ -187,9 +269,55 @@ The proxy system includes robust error handling for reliable communication:
 - **Serialization Protection**: Automatic detection and recovery from object stream corruption
 - **Response Size Limits**: 50MB limit to prevent oversized responses from causing issues
 - **Socket Health Monitoring**: Intelligent connection health checks without stream interference
+- **Timeout Management**: 30-second socket timeouts with automatic retry and recovery
+- **Connection Validation**: Pre-request health checks ensure reliable communication
 - **Detailed Error Logging**: Comprehensive error classification and troubleshooting information
 
+## Connection Management and Health Monitoring
+
+### Server-Side Connection Management
+- **Real-time Client Tracking**: Monitor connected clients via `/api/health` endpoint
+- **Automatic Cleanup**: Unhealthy connections are automatically detected and removed
+- **Manual Cleanup**: Use `/api/cleanup-connections` endpoint for manual intervention
+- **Connection Validation**: Each request validates client connection health before forwarding
+- **Zombie Connection Prevention**: Automatic detection and removal of abandoned connections
+
+### Client-Side Connection Management
+- **Automatic Reconnection**: Clients automatically reconnect every 5 seconds on connection loss
+- **Heartbeat Monitoring**: Health checks every 30 seconds to maintain active connections
+- **Connection Health Detection**: Comprehensive socket health testing without data stream interference
+- **External Control Interface**: Methods for external systems to trigger reconnection or check status
+- **Graceful Failure Handling**: Detailed error analysis with specific troubleshooting guidance
+
 ## Debugging and Troubleshooting
+
+### Server-Side Debugging
+
+#### Health Monitoring
+Monitor server and client health using the health endpoint:
+```bash
+curl -X GET http://localhost:9999/api/health
+```
+
+This provides:
+- Server status and uptime
+- Number of connected clients
+- List of connected client names
+- Real-time connection health status
+
+#### Connection Management
+Clean up unhealthy connections manually:
+```bash
+curl -X POST http://localhost:9999/api/cleanup-connections \
+  -H "Authorization: Bearer your-admin-api-key"
+```
+
+#### Debug Logging
+Enable debug logging by setting the log level in your application configuration. The server provides detailed logging for:
+- Client connection/disconnection events
+- Request forwarding and response handling
+- Connection health checks and cleanup operations
+- Error classification and recovery attempts
 
 ### Enhanced Client Debugging
 
@@ -250,10 +378,11 @@ The client now logs extensive information during operation:
 - Server listening on wrong interface
 
 **Solutions**:
-1. Verify server is running: `java -jar proxy-1.0.jar`
+1. Verify server is running: `java -jar proxy-1.0.jar server`
 2. Test connectivity: `telnet <server-host> <server-port>`
 3. Check firewall settings
 4. Verify server configuration in `application.properties`
+5. Check server health: `curl http://localhost:9999/api/health`
 
 #### "Authentication failed" Error
 **Symptoms**: Client connects but authentication fails
@@ -266,6 +395,7 @@ The client now logs extensive information during operation:
 1. Check client token matches `proxy.auth.token` in server config
 2. Ensure no extra spaces or characters in token
 3. Verify server has authentication enabled
+4. Check server security status via admin API
 
 #### "DNS resolution failed" Error
 **Symptoms**: Cannot resolve server hostname
@@ -273,3 +403,49 @@ The client now logs extensive information during operation:
 1. Use IP address instead of hostname
 2. Check DNS configuration
 3. Test with: `nslookup <server-host>`
+
+#### "Socket timeout" Errors
+**Symptoms**: Connections timing out after 30 seconds
+**Possible Causes**:
+- Network latency issues
+- Server overload
+- Client processing delays
+
+**Solutions**:
+1. Check network connectivity between client and server
+2. Monitor server load and resource usage
+3. Verify client can process requests within timeout window
+4. Use the connection cleanup endpoint if connections become stale
+
+#### "Unhealthy connection" Warnings
+**Symptoms**: Server reports unhealthy client connections
+**Solutions**:
+1. Check client reconnection logs for connection issues
+2. Manually trigger connection cleanup: `POST /api/cleanup-connections`
+3. Monitor client heartbeat and reconnection behavior
+4. Verify network stability between client and server
+
+#### Client Reconnection Issues
+**Symptoms**: Client cannot maintain stable connection
+**Solutions**:
+1. Check client logs for detailed reconnection diagnostics
+2. Verify network stability and firewall settings
+3. Monitor server health endpoint for connection status
+4. Ensure client has proper permissions and authentication
+5. Check for resource constraints on client or server systems
+
+## Performance and Monitoring
+
+### Key Metrics to Monitor
+- **Connected Client Count**: Track via `/api/health` endpoint
+- **Connection Health**: Monitor for unhealthy or zombie connections
+- **Authentication Failures**: Watch security logs for potential attacks
+- **Response Times**: Monitor request/response processing times
+- **Reconnection Frequency**: Track client reconnection attempts
+
+### Best Practices
+- **Regular Health Checks**: Monitor the `/api/health` endpoint regularly
+- **Connection Cleanup**: Use automated monitoring to trigger `/api/cleanup-connections` when needed
+- **Security Monitoring**: Regular checks of `/api/security-status` for threat detection
+- **Log Analysis**: Review debug logs for connection patterns and potential issues
+- **Resource Monitoring**: Track server memory and CPU usage, especially with many connected clients
