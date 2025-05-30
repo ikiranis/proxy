@@ -397,4 +397,43 @@ public class GeneralController {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(response);
         }
     }
+
+    /**
+     * Manually triggers cleanup of unhealthy client connections.
+     * 
+     * This endpoint removes zombie connections that appear connected but are actually broken,
+     * helping to maintain accurate connection state and prevent timeout issues.
+     * 
+     * @param authHeader the authorization header for admin authentication
+     * @return response containing the number of connections cleaned up
+     */
+    @PostMapping("/api/cleanup-connections")
+    public ResponseEntity<Map<String, Object>> cleanupConnections(@RequestHeader(value = "Authorization", required = false) String authHeader) {
+        Map<String, Object> response = new HashMap<>();
+        
+        try {
+            // Admin authentication check
+            if (!adminAuthUtils.isAuthorizedAdmin(authHeader)) {
+                response.put("error", "Unauthorized");
+                response.put("message", "Admin authentication required");
+                return ResponseEntity.status(401).body(response);
+            }
+            
+            // Perform connection cleanup
+            int removedCount = proxyService.cleanupUnhealthyConnections();
+            
+            response.put("success", true);
+            response.put("removedConnections", removedCount);
+            response.put("remainingConnections", proxyService.getConnectedClientCount());
+            response.put("connectedClients", proxyService.getConnectedClientNames());
+            response.put("timestamp", java.time.LocalDateTime.now().toString());
+            
+            return ResponseEntity.ok(response);
+            
+        } catch (Exception e) {
+            response.put("error", "Cleanup failed");
+            response.put("message", e.getMessage());
+            return ResponseEntity.status(500).body(response);
+        }
+    }
 }

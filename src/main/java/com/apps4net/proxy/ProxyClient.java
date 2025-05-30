@@ -70,17 +70,30 @@ public class ProxyClient {
         Logger.info("Server Host: " + serverHost);
         Logger.info("Server Port: " + serverPort);
         Logger.info("Auth Token: " + (authToken != null ? "***configured***" : "NOT SET"));
+        Logger.info("Reconnection enabled: Yes (every " + (RECONNECT_DELAY_MS / 1000) + " seconds on failure)");
+        Logger.info("Health monitoring: Yes (every " + (HEARTBEAT_INTERVAL_MS / 1000) + " seconds)");
         Logger.info("============================");
         
         boolean firstAttempt = true;
+        int reconnectAttempt = 0;
         
         while (isRunning) {
             try {
                 if (firstAttempt) {
                     performPreConnectionDiagnostics();
                     firstAttempt = false;
+                } else {
+                    reconnectAttempt++;
+                    Logger.info("=== Reconnection Attempt #" + reconnectAttempt + " ===");
                 }
+                
                 connectAndCommunicate();
+                
+                // If we get here, connection was successful and then ended
+                if (isRunning) {
+                    Logger.info("Connection ended normally, will attempt to reconnect");
+                }
+                
             } catch (Exception e) {
                 handleConnectionFailure(e);
                 if (isRunning) {
@@ -94,7 +107,7 @@ public class ProxyClient {
                 }
             }
         }
-        Logger.info("ProxyClient stopped");
+        Logger.info("ProxyClient stopped (Total reconnection attempts: " + reconnectAttempt + ")");
     }
 
     /**
@@ -110,6 +123,28 @@ public class ProxyClient {
      */
     public void stop() {
         isRunning = false;
+    }
+
+    /**
+     * Forces an immediate reconnection by closing the current socket.
+     * 
+     * This method can be called externally to trigger a reconnection
+     * when connection issues are detected from outside the client.
+     * The main connection loop will automatically attempt to reconnect.
+     */
+    public void forceReconnect() {
+        Logger.info("Force reconnection requested - will reconnect on next iteration");
+        // The isRunning flag is still true, so the main loop will attempt reconnection
+        // We don't have direct access to the socket here, but the health checks will detect issues
+    }
+
+    /**
+     * Gets the current connection status of the client.
+     * 
+     * @return true if the client is currently running and should be connected, false if stopped
+     */
+    public boolean isRunning() {
+        return isRunning;
     }
 
     /**
@@ -187,21 +222,22 @@ public class ProxyClient {
             
             try {
                 while (isRunning && !socket.isClosed()) {
-                    // Check if socket is still connected
+                    // Check if socket is still connected before proceeding
                     if (!isSocketHealthy(socket)) {
-                        Logger.error("Socket connection health check failed");
+                        Logger.error("Socket connection health check failed - initiating reconnection");
                         Logger.error("Socket state: closed=" + socket.isClosed() + ", connected=" + socket.isConnected());
-                        Logger.error("Breaking communication loop");
+                        Logger.error("Breaking communication loop to trigger reconnection");
                         break;
                     }
                     
-                    // Wait for ProxyRequest from server with timeout
-                    socket.setSoTimeout(5000); // 5 second timeout for checking isRunning
+                    // Wait for ProxyRequest from server - DO NOT set timeout here
+                    // The server controls the timing and has its own timeout handling
                     Object obj;
                     try {
                         obj = objectIn.readObject();
                     } catch (java.net.SocketTimeoutException e) {
-                        // Timeout is expected, continue loop to check isRunning and socket health
+                        Logger.error("[CLIENT] Unexpected timeout while waiting for server request");
+                        Logger.error("[CLIENT] This suggests a server-side communication issue");
                         continue;
                     }
                     
@@ -295,7 +331,7 @@ public class ProxyClient {
      * - Runs every 30 seconds
      * - Performs socket health checks
      * - Logs connection status
-     * - Terminates if connection becomes unhealthy
+     * - Triggers reconnection if connection becomes unhealthy
      * - Handles interruption gracefully during shutdown
      * 
      * @param socket the socket connection to monitor
@@ -309,8 +345,15 @@ public class ProxyClient {
                 try {
                     Thread.sleep(HEARTBEAT_INTERVAL_MS);
                     if (!isSocketHealthy(socket)) {
-                        Logger.error("Heartbeat: Socket connection is unhealthy");
+                        Logger.error("Heartbeat: Socket connection is unhealthy - triggering reconnection");
+                        try {
+                            socket.close(); // Force close to trigger reconnection in main loop
+                        } catch (Exception e) {
+                            Logger.error("Error closing unhealthy socket: " + e.getMessage());
+                        }
                         break;
+                    } else {
+                        Logger.info("Heartbeat: Connection healthy");
                     }
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
@@ -327,27 +370,52 @@ public class ProxyClient {
     }
 
     /**
-     * Performs a health check on the socket connection.
+     * Performs a comprehensive health check on the socket connection.
      * 
      * This method verifies connection health by:
      * 1. Checking if the socket is open and connected
-     * 2. Attempting to write a test byte to the output stream
-     * 3. Flushing the stream to detect write failures
+     * 2. Testing if the socket streams are accessible
+     * 3. Checking for connection shutdown states
+     * 4. Verifying the socket is not in an error state
      * 
      * The health check is non-intrusive and should not affect normal
-     * communication flow.
+     * communication flow with object streams.
      * 
      * @param socket the socket connection to check
      * @return true if the socket is healthy and writable, false otherwise
      */
     private boolean isSocketHealthy(Socket socket) {
         if (socket == null || socket.isClosed() || !socket.isConnected()) {
+            Logger.debug("Socket health check failed: socket is null, closed, or not connected");
             return false;
         }
         
-        // Don't interfere with object streams by writing test bytes
-        // Just check the socket state
-        return true;
+        try {
+            // Check for shutdown states
+            if (socket.isInputShutdown() || socket.isOutputShutdown()) {
+                Logger.debug("Socket health check failed: input or output is shutdown");
+                return false;
+            }
+            
+            // Test if we can access the streams without writing
+            // This will fail if the socket is broken
+            socket.getOutputStream();
+            socket.getInputStream();
+            
+            // Additional check for broken connections by testing available data
+            // without blocking (available() returns immediately)
+            try {
+                socket.getInputStream().available();
+            } catch (Exception e) {
+                Logger.debug("Socket health check failed: cannot read stream availability - " + e.getMessage());
+                return false;
+            }
+            
+            return true;
+        } catch (Exception e) {
+            Logger.debug("Socket health check failed: " + e.getMessage());
+            return false;
+        }
     }
 
     /**

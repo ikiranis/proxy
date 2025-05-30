@@ -163,7 +163,17 @@ public class ProxyService {
         if (client == null) {
             throw new Exception("Client not connected");
         }
-        return client.sendRequestAndGetResponse(proxyRequest);
+        
+        try {
+            return client.sendRequestAndGetResponse(proxyRequest);
+        } catch (Exception e) {
+            // If communication fails due to unhealthy connection, remove client from pool
+            if (e.getMessage() != null && e.getMessage().contains("connection is unhealthy")) {
+                Logger.error("Removing unhealthy client '" + clientName + "' from connection pool");
+                clients.remove(clientName);
+            }
+            throw e; // Re-throw the original exception
+        }
     }
 
     /**
@@ -210,5 +220,48 @@ public class ProxyService {
      */
     public java.util.List<String> getConnectedClientNames() {
         return new java.util.ArrayList<>(clients.keySet());
+    }
+
+    /**
+     * Performs health checks on all connected clients and removes unhealthy connections.
+     * 
+     * This method can be called periodically to clean up zombie connections that
+     * appear connected but are actually broken, preventing slow timeout errors.
+     * 
+     * @return the number of unhealthy connections that were removed
+     */
+    public int cleanupUnhealthyConnections() {
+        int removedCount = 0;
+        java.util.Iterator<Map.Entry<String, ClientHandler>> iterator = clients.entrySet().iterator();
+        
+        while (iterator.hasNext()) {
+            Map.Entry<String, ClientHandler> entry = iterator.next();
+            String clientName = entry.getKey();
+            ClientHandler handler = entry.getValue();
+            
+            try {
+                // Test if the handler's connection is still healthy
+                Socket socket = handler.getSocket();
+                if (socket == null || socket.isClosed() || 
+                    !socket.isConnected() || socket.isInputShutdown() || 
+                    socket.isOutputShutdown()) {
+                    
+                    Logger.info("Removing unhealthy client '" + clientName + "' during cleanup");
+                    iterator.remove();
+                    removedCount++;
+                }
+            } catch (Exception e) {
+                Logger.error("Error checking health of client '" + clientName + "': " + e.getMessage());
+                Logger.info("Removing problematic client '" + clientName + "' during cleanup");
+                iterator.remove();
+                removedCount++;
+            }
+        }
+        
+        if (removedCount > 0) {
+            Logger.info("Connection cleanup completed: removed " + removedCount + " unhealthy connections");
+        }
+        
+        return removedCount;
     }
 }

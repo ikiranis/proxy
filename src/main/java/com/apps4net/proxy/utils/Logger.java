@@ -9,6 +9,7 @@ import java.time.format.DateTimeFormatter;
  */
 public class Logger {
     private static final DateTimeFormatter TIMESTAMP_FORMAT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSS");
+    private static boolean debugEnabled = false; // Can be enabled for detailed logging
     
     /**
      * Logs an informational message with timestamp.
@@ -17,6 +18,26 @@ public class Logger {
      */
     public static void info(String message) {
         System.out.println(getTimestamp() + " [INFO] " + message);
+    }
+    
+    /**
+     * Logs a debug message with timestamp (only if debug is enabled).
+     * 
+     * @param message The debug message to log
+     */
+    public static void debug(String message) {
+        if (debugEnabled) {
+            System.out.println(getTimestamp() + " [DEBUG] " + message);
+        }
+    }
+    
+    /**
+     * Enables or disables debug logging.
+     * 
+     * @param enabled true to enable debug logging, false to disable
+     */
+    public static void setDebugEnabled(boolean enabled) {
+        debugEnabled = enabled;
     }
     
     /**

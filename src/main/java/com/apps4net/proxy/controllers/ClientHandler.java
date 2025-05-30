@@ -102,6 +102,9 @@ public class ClientHandler extends Thread {
         try {
             Logger.info("Initializing object streams for proxy client communication...");
             
+            // Set socket timeout for request/response operations
+            socket.setSoTimeout(30000); // 30 second timeout for request/response operations
+            
             // Initialize object streams directly without protocol detection
             // The ObjectInputStream will naturally throw an exception if HTTP data is sent
             Logger.info("Creating ObjectOutputStream...");
@@ -260,14 +263,13 @@ public class ClientHandler extends Thread {
      * @see ProxyRequest
      * @see ProxyResponse
      */
-    // Send request to client and wait for response
     public synchronized ProxyResponse sendRequestAndGetResponse(ProxyRequest proxyRequest) throws Exception {
         try {
             Logger.info("Sending ProxyRequest to client '" + clientName + "': " + proxyRequest);
             
-            // Check if connection is still alive before sending
-            if (socket.isClosed() || !socket.isConnected()) {
-                throw new Exception("Client socket is closed or disconnected");
+            // Perform connection health check before attempting communication
+            if (!isConnectionHealthy()) {
+                throw new Exception("Client '" + clientName + "' connection is unhealthy - removing from connection pool");
             }
             
             objectOut.writeObject(proxyRequest);
@@ -285,6 +287,13 @@ public class ClientHandler extends Thread {
             ProxyResponse proxyResponse = (ProxyResponse) responseObj;
             Logger.info("ProxyResponse received successfully from client '" + clientName + "'");
             return proxyResponse;
+            
+        } catch (java.net.SocketTimeoutException e) {
+            Logger.error("Timeout occurred while waiting for response from client '" + clientName + "'");
+            Logger.error("Client may be unresponsive or experiencing connection issues");
+            Logger.error("Socket timeout: " + socket.getSoTimeout() + "ms");
+            throw new Exception("Request timeout: Client '" + clientName + "' did not respond within " + 
+                              (socket.getSoTimeout() / 1000) + " seconds");
             
         } catch (java.io.StreamCorruptedException e) {
             Logger.error("Stream corruption detected while communicating with client '" + clientName + "'");
@@ -576,4 +585,53 @@ public class ClientHandler extends Thread {
         return status;
     }
 
+    /**
+     * Performs a health check on the client connection to detect broken sockets.
+     * 
+     * This method tests the connection state before attempting to send requests,
+     * helping to detect zombie connections that appear connected but are actually broken.
+     * 
+     * @return true if the connection is healthy and ready for communication
+     */
+    private boolean isConnectionHealthy() {
+        try {
+            // Basic socket state checks
+            if (socket == null || socket.isClosed() || !socket.isConnected()) {
+                Logger.error("Connection health check failed: Socket is null, closed, or not connected");
+                return false;
+            }
+            
+            // Check if streams are closed
+            if (socket.isInputShutdown() || socket.isOutputShutdown()) {
+                Logger.error("Connection health check failed: Input or output stream is shutdown");
+                return false;
+            }
+            
+            // Check if the socket is still valid by accessing streams
+            try {
+                socket.getOutputStream();
+                socket.getInputStream();
+            } catch (Exception e) {
+                Logger.error("Connection health check failed: Cannot access socket streams - " + e.getMessage());
+                return false;
+            }
+            
+            Logger.debug("Connection health check passed for client '" + clientName + "'");
+            return true;
+            
+        } catch (Exception e) {
+            Logger.error("Connection health check failed with exception: " + e.getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * Gets the socket connection for this client handler.
+     * Used for connection health monitoring and cleanup operations.
+     * 
+     * @return the socket connection to the client
+     */
+    public Socket getSocket() {
+        return socket;
+    }
 }
