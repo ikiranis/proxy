@@ -196,4 +196,19 @@ public class ProxyService {
     public int getConnectedClientCount() {
         return clients.size();
     }
+
+    /**
+     * Gets the list of currently connected client names.
+     * 
+     * This method returns a list containing the names of all currently
+     * connected proxy clients. It's useful for monitoring which specific
+     * clients are active and for health check reporting.
+     * 
+     * @return a list of client names for all currently connected clients
+     * 
+     * @see GeneralController#healthCheck()
+     */
+    public java.util.List<String> getConnectedClientNames() {
+        return new java.util.ArrayList<>(clients.keySet());
+    }
 }

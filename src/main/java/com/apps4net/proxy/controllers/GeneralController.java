@@ -161,6 +161,7 @@ public class GeneralController {
         
         try {
             int connectedClients = proxyService.getConnectedClientCount();
+            java.util.List<String> connectedClientNames = proxyService.getConnectedClientNames();
             
             // Basic server information
             healthInfo.put("timestamp", LocalDateTime.now().format(DateTimeFormatter.ISO_LOCAL_DATE_TIME));
@@ -168,6 +169,7 @@ public class GeneralController {
             healthInfo.put("version", "1.0");
             healthInfo.put("socketServerRunning", true); // Socket server is started in ProxyService constructor
             healthInfo.put("connectedClients", connectedClients);
+            healthInfo.put("connectedClientNames", connectedClientNames);
             healthInfo.put("uptime", ServerUtils.getServerUptime());
             
             // Check if any clients are connected
