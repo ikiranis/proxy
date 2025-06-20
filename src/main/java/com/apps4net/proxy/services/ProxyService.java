@@ -177,19 +177,42 @@ public class ProxyService {
     }
 
     /**
-     * Checks if a client with the specified name is currently connected.
+     * Checks if a client with the specified name is currently connected and healthy.
      * 
      * This method provides a quick way to validate client availability
-     * before attempting to forward requests. It's used by the REST controller
-     * to provide early validation and appropriate error responses.
+     * before attempting to forward requests. It not only checks if the client
+     * exists in the connection pool but also verifies that the connection is healthy.
      * 
      * @param clientName the name of the client to check
-     * @return true if the client is connected and available, false otherwise
+     * @return true if the client is connected and has a healthy connection, false otherwise
      * 
      * @see GeneralController#forwardToClient(ProxyRequest)
      */
     public boolean isClientConnected(String clientName) {
-        return clients.containsKey(clientName);
+        ClientHandler handler = clients.get(clientName);
+        if (handler == null) {
+            return false;
+        }
+        
+        // Verify the connection is actually healthy
+        try {
+            Socket socket = handler.getSocket();
+            if (socket == null || socket.isClosed() || 
+                !socket.isConnected() || socket.isInputShutdown() || 
+                socket.isOutputShutdown()) {
+                
+                // Remove the unhealthy client from the pool
+                Logger.info("Removing unhealthy client '" + clientName + "' during connection check");
+                clients.remove(clientName);
+                return false;
+            }
+            return true;
+        } catch (Exception e) {
+            // If we can't check the connection health, assume it's unhealthy
+            Logger.error("Error checking client '" + clientName + "' health: " + e.getMessage());
+            clients.remove(clientName);
+            return false;
+        }
     }
 
     /**
@@ -227,6 +250,8 @@ public class ProxyService {
      * 
      * This method can be called periodically to clean up zombie connections that
      * appear connected but are actually broken, preventing slow timeout errors.
+     * It performs comprehensive connection health checks including socket state
+     * validation and basic connectivity tests.
      * 
      * @return the number of unhealthy connections that were removed
      */
@@ -246,10 +271,22 @@ public class ProxyService {
                     !socket.isConnected() || socket.isInputShutdown() || 
                     socket.isOutputShutdown()) {
                     
-                    Logger.info("Removing unhealthy client '" + clientName + "' during cleanup");
+                    Logger.info("Removing unhealthy client '" + clientName + "' during cleanup (socket state check failed)");
+                    iterator.remove();
+                    removedCount++;
+                    continue;
+                }
+                
+                // Additional health check: verify the socket is still responsive
+                // We can do this by checking if we can send keep-alive or by testing socket properties
+                try {
+                    socket.sendUrgentData(0xFF); // Send out-of-band data to test connection
+                } catch (Exception socketException) {
+                    Logger.info("Removing unresponsive client '" + clientName + "' during cleanup (connectivity test failed)");
                     iterator.remove();
                     removedCount++;
                 }
+                
             } catch (Exception e) {
                 Logger.error("Error checking health of client '" + clientName + "': " + e.getMessage());
                 Logger.info("Removing problematic client '" + clientName + "' during cleanup");

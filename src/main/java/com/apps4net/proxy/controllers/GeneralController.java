@@ -137,11 +137,16 @@ public class GeneralController {
      * - Server status (healthy/unhealthy based on client connections)
      * - Current timestamp
      * - Socket server availability
-     * - Number of connected clients
+     * - Number of connected clients (after cleanup of unhealthy connections)
      * - Server version information
+     * - Count of unhealthy connections that were removed during the health check
      * 
      * The server is considered unhealthy if no proxy clients are connected,
      * as this means the proxy service cannot fulfill its primary function.
+     * 
+     * This endpoint automatically performs connection cleanup to ensure accurate
+     * reporting of active connections. Stale or broken connections are removed
+     * before calculating the health status.
      * 
      * This endpoint can be used by:
      * - Monitoring systems to check server health
@@ -160,6 +165,9 @@ public class GeneralController {
         Map<String, Object> healthInfo = new HashMap<>();
         
         try {
+            // Clean up unhealthy connections before reporting health status
+            int removedConnections = proxyService.cleanupUnhealthyConnections();
+            
             int connectedClients = proxyService.getConnectedClientCount();
             java.util.List<String> connectedClientNames = proxyService.getConnectedClientNames();
             
@@ -170,6 +178,7 @@ public class GeneralController {
             healthInfo.put("socketServerRunning", true); // Socket server is started in ProxyService constructor
             healthInfo.put("connectedClients", connectedClients);
             healthInfo.put("connectedClientNames", connectedClientNames);
+            healthInfo.put("removedUnhealthyConnections", removedConnections);
             healthInfo.put("uptime", ServerUtils.getServerUptime());
             
             // Check if any clients are connected
