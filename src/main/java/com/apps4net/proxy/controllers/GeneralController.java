@@ -35,6 +35,7 @@ import java.util.HashMap;
 public class GeneralController {
     private final ProxyService proxyService;
     private final AdminAuthUtils adminAuthUtils;
+    private static final String PROJECT_VERSION = "1.2";
 
     /**
      * Constructs a new GeneralController with the specified ProxyService and AdminAuthUtils.
@@ -181,7 +182,7 @@ public class GeneralController {
             // Basic server information
             healthInfo.put("timestamp", LocalDateTime.now().format(DateTimeFormatter.ISO_LOCAL_DATE_TIME));
             healthInfo.put("server", "Proxy Server");
-            healthInfo.put("version", "1.0");
+            healthInfo.put("version", PROJECT_VERSION);
             healthInfo.put("socketServerRunning", true); // Socket server is started in ProxyService constructor
             healthInfo.put("connectedClients", connectedClients);
             healthInfo.put("connectedClientNames", connectedClientNames);
