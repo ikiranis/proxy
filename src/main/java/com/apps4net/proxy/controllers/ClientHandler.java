@@ -323,6 +323,67 @@ public class ClientHandler extends Thread {
     }
 
     /**
+     * Sends a heartbeat request to the client with a short timeout to test connection health.
+     * 
+     * This method is used for health checking during cleanup operations. It sends a special
+     * HEARTBEAT request and waits for a response with a reduced timeout to quickly detect
+     * dead connections without affecting normal request processing.
+     * 
+     * @param heartbeatRequest the heartbeat request to send
+     * @return true if client responds within timeout, false if connection is dead
+     */
+    public synchronized boolean sendHeartbeatRequest(com.apps4net.proxy.shared.ProxyRequest heartbeatRequest) {
+        try {
+            // Store original timeout
+            int originalTimeout = socket.getSoTimeout();
+            
+            try {
+                // Set a short timeout for heartbeat (3 seconds)
+                socket.setSoTimeout(3000);
+                
+                // Perform basic connection health check first
+                if (!isConnectionHealthy()) {
+                    return false;
+                }
+                
+                Logger.debug("Sending heartbeat request to client '" + clientName + "'");
+                
+                // Send heartbeat request
+                objectOut.writeObject(heartbeatRequest);
+                objectOut.flush();
+                
+                // Wait for response
+                Object responseObj = objectIn.readObject();
+                
+                if (responseObj instanceof com.apps4net.proxy.shared.ProxyResponse) {
+                    Logger.debug("Heartbeat response received from client '" + clientName + "'");
+                    return true;
+                } else {
+                    Logger.debug("Heartbeat failed: unexpected response type from client '" + clientName + "'");
+                    return false;
+                }
+                
+            } finally {
+                // Restore original timeout
+                try {
+                    socket.setSoTimeout(originalTimeout);
+                } catch (Exception e) {
+                    // If we can't restore timeout, connection is probably broken
+                    Logger.debug("Failed to restore socket timeout for client '" + clientName + "' - connection may be broken");
+                    return false;
+                }
+            }
+            
+        } catch (java.net.SocketTimeoutException e) {
+            Logger.debug("Heartbeat timeout for client '" + clientName + "' - connection appears dead");
+            return false;
+        } catch (Exception e) {
+            Logger.debug("Heartbeat failed for client '" + clientName + "': " + e.getMessage());
+            return false;
+        }
+    }
+
+    /**
      * Handles HTTP requests sent to the socket server port by mistake.
      * 
      * This method sends an appropriate HTTP error response explaining that

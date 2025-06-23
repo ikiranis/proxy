@@ -278,12 +278,24 @@ public class ProxyService {
                     continue;
                 }
                 
-                // Additional health check: verify the socket is still responsive
-                // We can do this by checking if we can send keep-alive or by testing socket properties
+                // Active heartbeat test: try to send a test request and get a response
+                // This is the most reliable way to detect dead connections in production
                 try {
-                    socket.sendUrgentData(0xFF); // Send out-of-band data to test connection
-                } catch (Exception socketException) {
-                    Logger.info("Removing unresponsive client '" + clientName + "' during cleanup (connectivity test failed)");
+                    // Send a special heartbeat request to the client
+                    com.apps4net.proxy.shared.ProxyRequest heartbeatRequest = 
+                        new com.apps4net.proxy.shared.ProxyRequest(clientName, "HEARTBEAT", "ping", "");
+                    
+                    // Use the ClientHandler's sendRequest method with a short timeout
+                    boolean heartbeatSuccess = handler.sendHeartbeatRequest(heartbeatRequest);
+                    
+                    if (!heartbeatSuccess) {
+                        Logger.info("Removing unresponsive client '" + clientName + "' during cleanup (heartbeat test failed)");
+                        iterator.remove();
+                        removedCount++;
+                    }
+                    
+                } catch (Exception heartbeatException) {
+                    Logger.info("Removing unresponsive client '" + clientName + "' during cleanup (heartbeat failed: " + heartbeatException.getMessage() + ")");
                     iterator.remove();
                     removedCount++;
                 }

@@ -251,6 +251,23 @@ public class ProxyClient {
                     com.apps4net.proxy.shared.ProxyRequest proxyRequest = (com.apps4net.proxy.shared.ProxyRequest) obj;
                     Logger.info("[CLIENT] Received ProxyRequest: " + proxyRequest.getHttpMethodType() + " " + proxyRequest.getUrl());
                     
+                    // Handle heartbeat requests specially
+                    if ("HEARTBEAT".equals(proxyRequest.getHttpMethodType())) {
+                        Logger.debug("[CLIENT] Processing heartbeat request from server");
+                        // Respond immediately with a success response for heartbeats
+                        com.apps4net.proxy.shared.ProxyResponse heartbeatResponse = 
+                            new com.apps4net.proxy.shared.ProxyResponse(200, "heartbeat_ok");
+                        
+                        try {
+                            objectOut.writeObject(heartbeatResponse);
+                            objectOut.flush();
+                            Logger.debug("[CLIENT] Heartbeat response sent successfully");
+                        } catch (Exception e) {
+                            Logger.error("[CLIENT] Failed to send heartbeat response: " + e.getMessage());
+                        }
+                        continue; // Skip normal processing for heartbeat requests
+                    }
+                    
                     // Perform the API call
                     Logger.info("[CLIENT] Starting API call to LAN webserver...");
                     String responseBody = forwardToLanWebserver(proxyRequest.getHttpMethodType(), proxyRequest.getUrl(), proxyRequest.getBody());
