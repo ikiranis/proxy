@@ -7,7 +7,6 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.HttpStatus;
-import org.springframework.beans.factory.annotation.Autowired;
 import com.apps4net.proxy.services.ProxyService;
 import com.apps4net.proxy.shared.ProxyRequest;
 import com.apps4net.proxy.shared.ProxyResponse;
@@ -43,7 +42,6 @@ public class GeneralController {
      * @param proxyService the service that handles proxy operations and client management
      * @param adminAuthUtils the utility for admin authentication and authorization
      */
-    @Autowired
     public GeneralController(ProxyService proxyService, AdminAuthUtils adminAuthUtils) {
         this.proxyService = proxyService;
         this.adminAuthUtils = adminAuthUtils;
