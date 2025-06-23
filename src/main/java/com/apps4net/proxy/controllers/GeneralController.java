@@ -138,6 +138,8 @@ public class GeneralController {
      * - Current timestamp
      * - Socket server availability
      * - Number of connected clients (after cleanup of unhealthy connections)
+     * - List of connected client names
+     * - Detailed client information including connection start times and uptime
      * - Server version information
      * - Count of unhealthy connections that were removed during the health check
      * 
@@ -147,6 +149,12 @@ public class GeneralController {
      * This endpoint automatically performs connection cleanup to ensure accurate
      * reporting of active connections. Stale or broken connections are removed
      * before calculating the health status.
+     * 
+     * Client details include:
+     * - Client name
+     * - Connection start time (ISO format)
+     * - Human-readable uptime duration
+     * - Connection status
      * 
      * This endpoint can be used by:
      * - Monitoring systems to check server health
@@ -170,6 +178,7 @@ public class GeneralController {
             
             int connectedClients = proxyService.getConnectedClientCount();
             java.util.List<String> connectedClientNames = proxyService.getConnectedClientNames();
+            java.util.List<Map<String, Object>> clientDetails = proxyService.getConnectedClientsDetails();
             
             // Basic server information
             healthInfo.put("timestamp", LocalDateTime.now().format(DateTimeFormatter.ISO_LOCAL_DATE_TIME));
@@ -178,6 +187,7 @@ public class GeneralController {
             healthInfo.put("socketServerRunning", true); // Socket server is started in ProxyService constructor
             healthInfo.put("connectedClients", connectedClients);
             healthInfo.put("connectedClientNames", connectedClientNames);
+            healthInfo.put("clientDetails", clientDetails);
             healthInfo.put("removedUnhealthyConnections", removedConnections);
             healthInfo.put("uptime", ServerUtils.getServerUptime());
             
@@ -414,7 +424,7 @@ public class GeneralController {
      * helping to maintain accurate connection state and prevent timeout issues.
      * 
      * @param authHeader the authorization header for admin authentication
-     * @return response containing the number of connections cleaned up
+     * @return response containing the number of connections cleaned up and detailed client information
      */
     @PostMapping("/api/cleanup-connections")
     public ResponseEntity<Map<String, Object>> cleanupConnections(@RequestHeader(value = "Authorization", required = false) String authHeader) {
@@ -435,6 +445,7 @@ public class GeneralController {
             response.put("removedConnections", removedCount);
             response.put("remainingConnections", proxyService.getConnectedClientCount());
             response.put("connectedClients", proxyService.getConnectedClientNames());
+            response.put("clientDetails", proxyService.getConnectedClientsDetails());
             response.put("timestamp", java.time.LocalDateTime.now().toString());
             
             return ResponseEntity.ok(response);

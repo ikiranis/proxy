@@ -5,6 +5,7 @@ import org.springframework.beans.factory.annotation.Value;
 import jakarta.annotation.PostConstruct;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.Map;
+import java.util.HashMap;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.io.IOException;
@@ -300,5 +301,32 @@ public class ProxyService {
         }
         
         return removedCount;
+    }
+
+    /**
+     * Gets detailed information about all currently connected clients.
+     * 
+     * This method returns a list of maps containing detailed information about each
+     * connected client, including their name, connection start time, and uptime duration.
+     * 
+     * @return a list of maps containing client details with uptime information
+     */
+    public java.util.List<Map<String, Object>> getConnectedClientsDetails() {
+        java.util.List<Map<String, Object>> clientDetails = new java.util.ArrayList<>();
+        
+        for (Map.Entry<String, ClientHandler> entry : clients.entrySet()) {
+            String clientName = entry.getKey();
+            ClientHandler handler = entry.getValue();
+            
+            Map<String, Object> clientInfo = new HashMap<>();
+            clientInfo.put("name", clientName);
+            clientInfo.put("connectionStartTime", handler.getConnectionStartTime().format(java.time.format.DateTimeFormatter.ISO_LOCAL_DATE_TIME));
+            clientInfo.put("uptime", handler.getConnectionUptime());
+            clientInfo.put("connected", true);
+            
+            clientDetails.add(clientInfo);
+        }
+        
+        return clientDetails;
     }
 }

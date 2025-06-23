@@ -34,6 +34,7 @@ public class ClientHandler extends Thread {
     private final Socket socket;
     private final Map<String, ClientHandler> clients;
     private final String requiredAuthToken;
+    private final LocalDateTime connectionStartTime;
     private String clientName;
     private ObjectOutputStream objectOut;
     private ObjectInputStream objectIn;
@@ -63,6 +64,7 @@ public class ClientHandler extends Thread {
         this.socket = socket;
         this.clients = clients;
         this.requiredAuthToken = authToken;
+        this.connectionStartTime = LocalDateTime.now();
     }
 
     /**
@@ -633,5 +635,37 @@ public class ClientHandler extends Thread {
      */
     public Socket getSocket() {
         return socket;
+    }
+
+    /**
+     * Gets the connection start time for this client handler.
+     * Used for monitoring connection uptime and duration.
+     * 
+     * @return the LocalDateTime when this connection was established
+     */
+    public LocalDateTime getConnectionStartTime() {
+        return connectionStartTime;
+    }
+
+    /**
+     * Gets the connection uptime duration in a human-readable format.
+     * 
+     * @return formatted uptime string (e.g., "2 hours, 15 minutes, 30 seconds")
+     */
+    public String getConnectionUptime() {
+        LocalDateTime now = LocalDateTime.now();
+        long totalSeconds = ChronoUnit.SECONDS.between(connectionStartTime, now);
+        
+        long hours = totalSeconds / 3600;
+        long minutes = (totalSeconds % 3600) / 60;
+        long seconds = totalSeconds % 60;
+        
+        if (hours > 0) {
+            return String.format("%d hours, %d minutes, %d seconds", hours, minutes, seconds);
+        } else if (minutes > 0) {
+            return String.format("%d minutes, %d seconds", minutes, seconds);
+        } else {
+            return String.format("%d seconds", seconds);
+        }
     }
 }
