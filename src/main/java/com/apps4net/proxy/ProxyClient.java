@@ -184,6 +184,11 @@ public class ProxyClient {
             Logger.info("ObjectOutputStream created successfully");
             Logger.info("ObjectInputStream created successfully");
             
+            // Set socket timeout for better connection health detection
+            // This allows the client to detect when server stops responding
+            socket.setSoTimeout(60000); // 60 second timeout for reading from server
+            Logger.info("Socket timeout set to 60 seconds for connection health monitoring");
+            
             // First message from client should be the authentication token
             Logger.info("[CLIENT] Sending authentication token...");
             objectOut.writeObject(authToken);
@@ -230,15 +235,25 @@ public class ProxyClient {
                         break;
                     }
                     
-                    // Wait for ProxyRequest from server - DO NOT set timeout here
-                    // The server controls the timing and has its own timeout handling
+                    // Wait for ProxyRequest from server with timeout
+                    // With heartbeat mechanism, server should send regular messages
+                    // If no message for 60 seconds, connection may be broken
                     Object obj;
                     try {
                         obj = objectIn.readObject();
                     } catch (java.net.SocketTimeoutException e) {
-                        Logger.error("[CLIENT] Unexpected timeout while waiting for server request");
-                        Logger.error("[CLIENT] This suggests a server-side communication issue");
-                        continue;
+                        Logger.info("[CLIENT] No message from server for 60 seconds");
+                        Logger.info("[CLIENT] Performing connection health check to verify server connectivity");
+                        
+                        // When timeout occurs, check if connection is still healthy
+                        if (!isSocketHealthy(socket, objectOut, objectIn)) {
+                            Logger.error("[CLIENT] Connection health check failed after timeout - server appears disconnected");
+                            Logger.error("[CLIENT] Breaking communication loop to trigger reconnection");
+                            break;
+                        } else {
+                            Logger.info("[CLIENT] Connection health check passed - server may be idle, continuing to wait");
+                            continue;
+                        }
                     }
                     
                     if (!(obj instanceof com.apps4net.proxy.shared.ProxyRequest)) {
@@ -446,53 +461,42 @@ public class ProxyClient {
     }
 
     /**
-     * Performs a non-intrusive health check on the object streams.
+     * Performs basic stream health check without interfering with main communication.
      * 
-     * This method validates stream health without sending actual messages that could
-     * interfere with the normal communication protocol. It tests stream responsiveness
-     * and validates that the streams are still functional for object serialization.
+     * This method validates connection health using safe, non-intrusive tests.
+     * Active communication testing is handled by the server-side heartbeat mechanism.
      * 
      * @param objectOut the ObjectOutputStream to validate
      * @param objectIn the ObjectInputStream to validate
-     * @return true if streams are healthy and responsive, false otherwise
+     * @return true if streams appear healthy, false if definitely broken
      */
     private boolean performStreamHealthCheck(ObjectOutputStream objectOut, ObjectInputStream objectIn) {
         try {
-            Logger.debug("Performing enhanced stream health check");
+            Logger.debug("Performing basic stream health check");
             
-            // Test stream health by checking if we can access them without errors
-            // and without sending actual protocol messages
-            
-            // Check if output stream is writable by testing its state
-            // This is a lightweight check that doesn't send data
+            // Test if we can flush the output stream
             try {
-                // Just verify the stream is accessible and not closed
-                objectOut.flush(); // This will fail if stream is broken
-                Logger.debug("ObjectOutputStream flush successful - stream is healthy");
+                objectOut.flush();
+                Logger.debug("ObjectOutputStream flush successful");
             } catch (Exception e) {
                 Logger.debug("ObjectOutputStream health check failed: " + e.getMessage());
                 return false;
             }
             
-            // Check if input stream has any available data without blocking
-            // This helps detect broken connections
+            // Test input stream availability
             try {
                 int available = objectIn.available();
                 Logger.debug("ObjectInputStream available bytes: " + available);
-                
-                // If there's unexpected data available, it might indicate a protocol issue
-                // but this alone shouldn't fail the health check as the server might have sent data
-                
             } catch (Exception e) {
                 Logger.debug("ObjectInputStream health check failed: " + e.getMessage());
                 return false;
             }
             
-            Logger.debug("Enhanced stream health check successful - streams are responsive");
+            Logger.debug("Basic stream health check passed");
             return true;
             
         } catch (Exception e) {
-            Logger.debug("Stream health check failed - error during validation: " + e.getMessage());
+            Logger.debug("Stream health check failed: " + e.getMessage());
             return false;
         }
     }
