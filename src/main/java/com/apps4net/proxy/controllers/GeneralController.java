@@ -37,7 +37,7 @@ public class GeneralController {
     private final ProxyService proxyService;
     private final AdminAuthUtils adminAuthUtils;
     private final com.apps4net.proxy.utils.ConnectionLogger connectionLogger;
-    private static final String PROJECT_VERSION = "1.2";
+    private static final String PROJECT_VERSION = "1.3";
 
     /**
      * Constructs a new GeneralController with the specified services.
