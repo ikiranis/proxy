@@ -5,6 +5,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.HttpStatus;
 import com.apps4net.proxy.services.ProxyService;
@@ -35,17 +36,20 @@ import java.util.HashMap;
 public class GeneralController {
     private final ProxyService proxyService;
     private final AdminAuthUtils adminAuthUtils;
+    private final com.apps4net.proxy.utils.ConnectionLogger connectionLogger;
     private static final String PROJECT_VERSION = "1.2";
 
     /**
-     * Constructs a new GeneralController with the specified ProxyService and AdminAuthUtils.
+     * Constructs a new GeneralController with the specified services.
      * 
      * @param proxyService the service that handles proxy operations and client management
      * @param adminAuthUtils the utility for admin authentication and authorization
+     * @param connectionLogger the connection logger for tracking client connections
      */
-    public GeneralController(ProxyService proxyService, AdminAuthUtils adminAuthUtils) {
+    public GeneralController(ProxyService proxyService, AdminAuthUtils adminAuthUtils, com.apps4net.proxy.utils.ConnectionLogger connectionLogger) {
         this.proxyService = proxyService;
         this.adminAuthUtils = adminAuthUtils;
+        this.connectionLogger = connectionLogger;
     }
 
     /**
@@ -454,5 +458,170 @@ public class GeneralController {
             response.put("message", e.getMessage());
             return ResponseEntity.status(500).body(response);
         }
+    }
+
+    /**
+     * Retrieves connection logs for monitoring client connections and disconnections.
+     * 
+     * This endpoint provides comprehensive connection logging information including:
+     * - All connection and disconnection events with timestamps
+     * - Client names and IP addresses
+     * - Connection statistics and summaries
+     * - Optional filtering by event type, client name, or time range
+     * 
+     * The endpoint supports several query parameters for filtering:
+     * - eventType: Filter by "CONNECT" or "DISCONNECT" events
+     * - clientName: Filter logs for a specific client
+     * - limit: Limit the number of results returned
+     * 
+     * This is useful for:
+     * - Monitoring client connection patterns
+     * - Debugging connection issues
+     * - Auditing client access
+     * - Tracking system usage and health
+     * 
+     * Authentication Required: This endpoint requires a valid admin API key in the Authorization header.
+     * 
+     * @param authorization the Authorization header containing the admin API key
+     * @param eventType optional filter for event type ("CONNECT" or "DISCONNECT")
+     * @param clientName optional filter for specific client name
+     * @param limit optional limit for number of results (default: all)
+     * @return ResponseEntity containing connection logs and statistics in JSON format
+     *         - 200: Logs retrieved successfully
+     *         - 401: Unauthorized (invalid or missing admin API key)
+     *         - 500: Internal server error during log retrieval
+     * 
+     * @since 1.2
+     */
+    @GetMapping(path = "/api/admin/connection-logs", produces = "application/json")
+    public ResponseEntity<Map<String, Object>> getConnectionLogs(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestParam(value = "eventType", required = false) String eventType,
+            @RequestParam(value = "clientName", required = false) String clientName,
+            @RequestParam(value = "limit", required = false) Integer limit) {
+        
+        Map<String, Object> response = new HashMap<>();
+        
+        // Check admin authentication first
+        if (!adminAuthUtils.isAuthorizedAdmin(authorization)) {
+            response.put("error", "Unauthorized");
+            response.put("message", "Valid admin API key required in Authorization header");
+            response.put("timestamp", LocalDateTime.now().format(DateTimeFormatter.ISO_LOCAL_DATE_TIME));
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(response);
+        }
+        
+        try {
+            java.util.List<Map<String, Object>> logs;
+            
+            // Apply filters based on query parameters
+            if (clientName != null && !clientName.trim().isEmpty()) {
+                logs = connectionLogger.getLogsForClient(clientName.trim());
+            } else if (eventType != null && !eventType.trim().isEmpty()) {
+                String normalizedEventType = eventType.trim().toUpperCase();
+                if ("CONNECT".equals(normalizedEventType) || "DISCONNECT".equals(normalizedEventType)) {
+                    logs = connectionLogger.getLogsByEventType(normalizedEventType);
+                } else {
+                    response.put("error", "Invalid event type");
+                    response.put("message", "Event type must be 'CONNECT' or 'DISCONNECT'");
+                    response.put("validEventTypes", java.util.Arrays.asList("CONNECT", "DISCONNECT"));
+                    return ResponseEntity.badRequest().body(response);
+                }
+            } else {
+                logs = connectionLogger.getAllLogs();
+            }
+            
+            // Apply limit if specified
+            if (limit != null && limit > 0 && logs.size() > limit) {
+                // Take the most recent entries
+                int startIndex = Math.max(0, logs.size() - limit);
+                logs = logs.subList(startIndex, logs.size());
+            }
+            
+            // Get connection statistics
+            Map<String, Object> statistics = connectionLogger.getConnectionStatistics();
+            
+            // Build response
+            response.put("success", true);
+            response.put("timestamp", LocalDateTime.now().format(DateTimeFormatter.ISO_LOCAL_DATE_TIME));
+            response.put("logs", logs);
+            response.put("statistics", statistics);
+            response.put("totalReturned", logs.size());
+            response.put("filters", createFiltersMap(eventType, clientName, limit));
+            
+            return ResponseEntity.ok(response);
+            
+        } catch (Exception e) {
+            response.put("error", "Failed to retrieve connection logs");
+            response.put("message", e.getMessage());
+            response.put("timestamp", LocalDateTime.now().format(DateTimeFormatter.ISO_LOCAL_DATE_TIME));
+            
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(response);
+        }
+    }
+
+    /**
+     * Clears all connection logs.
+     * 
+     * This endpoint removes all stored connection log entries. Use with caution
+     * as this action cannot be undone.
+     * 
+     * Authentication Required: This endpoint requires a valid admin API key in the Authorization header.
+     * 
+     * @param authorization the Authorization header containing the admin API key
+     * @return ResponseEntity containing the operation result
+     *         - 200: Logs cleared successfully
+     *         - 401: Unauthorized (invalid or missing admin API key)
+     *         - 500: Internal server error during log clearing
+     * 
+     * @since 1.2
+     */
+    @PostMapping(path = "/api/admin/connection-logs/clear", produces = "application/json")
+    public ResponseEntity<Map<String, Object>> clearConnectionLogs(
+            @RequestHeader(value = "Authorization", required = false) String authorization) {
+        
+        Map<String, Object> response = new HashMap<>();
+        
+        // Check admin authentication first
+        if (!adminAuthUtils.isAuthorizedAdmin(authorization)) {
+            response.put("error", "Unauthorized");
+            response.put("message", "Valid admin API key required in Authorization header");
+            response.put("timestamp", LocalDateTime.now().format(DateTimeFormatter.ISO_LOCAL_DATE_TIME));
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(response);
+        }
+        
+        try {
+            Map<String, Object> statisticsBeforeClear = connectionLogger.getConnectionStatistics();
+            connectionLogger.clearLogs();
+            
+            response.put("success", true);
+            response.put("message", "Connection logs cleared successfully");
+            response.put("timestamp", LocalDateTime.now().format(DateTimeFormatter.ISO_LOCAL_DATE_TIME));
+            response.put("clearedEntries", statisticsBeforeClear.get("totalLogEntries"));
+            
+            return ResponseEntity.ok(response);
+            
+        } catch (Exception e) {
+            response.put("error", "Failed to clear connection logs");
+            response.put("message", e.getMessage());
+            response.put("timestamp", LocalDateTime.now().format(DateTimeFormatter.ISO_LOCAL_DATE_TIME));
+            
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(response);
+        }
+    }
+
+    /**
+     * Creates a map containing the applied filters for the response.
+     * 
+     * @param eventType the event type filter
+     * @param clientName the client name filter
+     * @param limit the limit filter
+     * @return a map containing the filter information
+     */
+    private Map<String, Object> createFiltersMap(String eventType, String clientName, Integer limit) {
+        Map<String, Object> filters = new HashMap<>();
+        filters.put("eventType", eventType);
+        filters.put("clientName", clientName);
+        filters.put("limit", limit);
+        return filters;
     }
 }

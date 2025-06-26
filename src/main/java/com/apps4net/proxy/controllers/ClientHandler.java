@@ -35,6 +35,7 @@ public class ClientHandler extends Thread {
     private final Map<String, ClientHandler> clients;
     private final String requiredAuthToken;
     private final LocalDateTime connectionStartTime;
+    private final com.apps4net.proxy.utils.ConnectionLogger connectionLogger;
     private String clientName;
     private ObjectOutputStream objectOut;
     private ObjectInputStream objectIn;
@@ -59,11 +60,13 @@ public class ClientHandler extends Thread {
      * @param socket the socket connection to the client
      * @param clients the shared map of all connected clients for registration management
      * @param authToken the required authentication token for client verification
+     * @param connectionLogger the connection logger for tracking connection events
      */
-    public ClientHandler(Socket socket, Map<String, ClientHandler> clients, String authToken) {
+    public ClientHandler(Socket socket, Map<String, ClientHandler> clients, String authToken, com.apps4net.proxy.utils.ConnectionLogger connectionLogger) {
         this.socket = socket;
         this.clients = clients;
         this.requiredAuthToken = authToken;
+        this.connectionLogger = connectionLogger;
         this.connectionStartTime = LocalDateTime.now();
     }
 
@@ -157,6 +160,9 @@ public class ClientHandler extends Thread {
             clients.put(clientName, this);
             Logger.info("Client registration successful");
             
+            // Log the successful connection
+            connectionLogger.logConnection(clientName, clientIP);
+            
             Logger.info("=== CLIENT CONNECTION ESTABLISHED ===");
             Logger.info("Client Name: " + clientName);
             Logger.info("Client IP: " + clientIP);
@@ -232,8 +238,14 @@ public class ClientHandler extends Thread {
                 Logger.info("Removing client '" + clientName + "' from connection pool");
                 clients.remove(clientName);
                 Logger.info("Client removed. Remaining clients: " + clients.size());
+                
+                // Log the disconnection
+                connectionLogger.logDisconnection(clientName, clientIP, "Connection terminated");
             } else {
                 Logger.info("No client name to remove (connection failed before registration)");
+                
+                // Log the disconnection for unknown client
+                connectionLogger.logDisconnection(null, clientIP, "Connection failed before client registration");
             }
             try { 
                 socket.close(); 
@@ -728,5 +740,14 @@ public class ClientHandler extends Thread {
         } else {
             return String.format("%d seconds", seconds);
         }
+    }
+    
+    /**
+     * Gets the client IP address for this connection.
+     * 
+     * @return the client IP address as a string
+     */
+    public String getClientIP() {
+        return extractClientIP();
     }
 }

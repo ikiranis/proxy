@@ -34,6 +34,7 @@ import com.apps4net.proxy.utils.Logger;
 public class ProxyService {
     private final Map<String, ClientHandler> clients = new ConcurrentHashMap<>();
     private static boolean socketServerStarted = false;
+    private final com.apps4net.proxy.utils.ConnectionLogger connectionLogger;
     
     @Value("${proxy.auth.token}")
     private String authToken;
@@ -42,12 +43,15 @@ public class ProxyService {
     private int socketPort;
 
     /**
-     * Constructs a new ProxyService.
+     * Constructs a new ProxyService with the specified ConnectionLogger.
      * 
      * Socket server initialization is deferred to @PostConstruct to ensure
      * all Spring @Value properties are properly injected first.
+     * 
+     * @param connectionLogger the connection logger for tracking client connections
      */
-    public ProxyService() {
+    public ProxyService(com.apps4net.proxy.utils.ConnectionLogger connectionLogger) {
+        this.connectionLogger = connectionLogger;
         // Socket server will be started in initializeService() after dependency injection
     }
 
@@ -100,7 +104,7 @@ public class ProxyService {
                         Logger.info("Connection established at: " + java.time.LocalDateTime.now());
                         Logger.info("Starting ClientHandler thread...");
                         
-                        ClientHandler handler = new ClientHandler(clientSocket, clients, authToken);
+                        ClientHandler handler = new ClientHandler(clientSocket, clients, authToken, connectionLogger);
                         handler.start();
                         
                         Logger.info("ClientHandler thread started for: " + clientAddress);
@@ -204,6 +208,11 @@ public class ProxyService {
                 
                 // Remove the unhealthy client from the pool
                 Logger.info("Removing unhealthy client '" + clientName + "' during connection check");
+                
+                // Log the disconnection
+                String clientIP = handler.getClientIP();
+                connectionLogger.logDisconnection(clientName, clientIP, "Socket state check failed during connection validation");
+                
                 clients.remove(clientName);
                 return false;
             }
@@ -211,6 +220,13 @@ public class ProxyService {
         } catch (Exception e) {
             // If we can't check the connection health, assume it's unhealthy
             Logger.error("Error checking client '" + clientName + "' health: " + e.getMessage());
+            
+            // Log the disconnection
+            if (handler != null) {
+                String clientIP = handler.getClientIP();
+                connectionLogger.logDisconnection(clientName, clientIP, "Exception during connection validation: " + e.getMessage());
+            }
+            
             clients.remove(clientName);
             return false;
         }
@@ -273,6 +289,11 @@ public class ProxyService {
                     socket.isOutputShutdown()) {
                     
                     Logger.info("Removing unhealthy client '" + clientName + "' during cleanup (socket state check failed)");
+                    
+                    // Log the disconnection
+                    String clientIP = handler.getClientIP();
+                    connectionLogger.logDisconnection(clientName, clientIP, "Socket state check failed during cleanup");
+                    
                     iterator.remove();
                     removedCount++;
                     continue;
@@ -290,12 +311,22 @@ public class ProxyService {
                     
                     if (!heartbeatSuccess) {
                         Logger.info("Removing unresponsive client '" + clientName + "' during cleanup (heartbeat test failed)");
+                        
+                        // Log the disconnection
+                        String clientIP = handler.getClientIP();
+                        connectionLogger.logDisconnection(clientName, clientIP, "Heartbeat test failed during cleanup");
+                        
                         iterator.remove();
                         removedCount++;
                     }
                     
                 } catch (Exception heartbeatException) {
                     Logger.info("Removing unresponsive client '" + clientName + "' during cleanup (heartbeat failed: " + heartbeatException.getMessage() + ")");
+                    
+                    // Log the disconnection
+                    String clientIP = handler.getClientIP();
+                    connectionLogger.logDisconnection(clientName, clientIP, "Heartbeat exception during cleanup: " + heartbeatException.getMessage());
+                    
                     iterator.remove();
                     removedCount++;
                 }
@@ -303,6 +334,11 @@ public class ProxyService {
             } catch (Exception e) {
                 Logger.error("Error checking health of client '" + clientName + "': " + e.getMessage());
                 Logger.info("Removing problematic client '" + clientName + "' during cleanup");
+                
+                // Log the disconnection
+                String clientIP = handler.getClientIP();
+                connectionLogger.logDisconnection(clientName, clientIP, "Health check error during cleanup: " + e.getMessage());
+                
                 iterator.remove();
                 removedCount++;
             }
