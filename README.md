@@ -18,9 +18,85 @@ This application acts as a proxy between HTTP clients and internal clients conne
   - Registers itself with a unique client name (sent as the first object).
   - Waits for `ProxyRequest` objects from the server, processes them (performs the API call in its LAN), and sends back `ProxyResponse` objects.
 
+## Version 1.3 Features
+
+### Connection Logging and Monitoring
+
+- **Comprehensive Connection Tracking**: Logs every client connect/disconnect event with timestamp, client name, and IP address
+- **Admin Connection Log API**: Retrieve, filter, and manage connection logs via REST endpoints
+- **Connection Statistics**: Track connection patterns, active clients, and historical data
+- **Automatic Cleanup**: Scheduled cleanup of unhealthy connections every minute
+- **Enhanced Health Validation**: Improved client-server connection health checks to prevent false positives
+
+### Enhanced Admin API
+
+- **Connection Log Management**: New endpoints for retrieving and clearing connection logs
+- **Advanced Filtering**: Filter connection logs by event type, client name, or limit results
+- **Real-time Statistics**: Access comprehensive connection statistics and metrics
+- **Improved Security**: Robust admin authentication for all management endpoints
+
+## Version 1.3 New Features
+
+### Connection Event Logging System
+
+Version 1.3 introduces a comprehensive connection logging system that provides detailed tracking of all client interactions:
+
+#### Key Features
+
+- **Real-time Event Logging**: Every client connect and disconnect is logged with precise timestamps
+- **Detailed Metadata**: Logs include client name, IP address, event type, and reason for disconnection
+- **Smart Filtering**: Avoid logging "unknown" disconnections for failed handshakes or invalid requests
+- **Admin API Integration**: Full REST API access for log management and analysis
+- **Memory Efficient**: Automatic log rotation with configurable limits (default: 1000 entries)
+- **Statistical Analysis**: Built-in connection statistics and pattern analysis
+
+#### Admin API Endpoints
+
+- `GET /api/admin/connection-logs` - Retrieve logs with filtering options
+- `POST /api/admin/connection-logs/clear` - Clear all stored logs
+- Filter by event type, client name, or limit results
+- Access comprehensive connection statistics
+
+### Enhanced Connection Management
+
+- **Automatic Scheduled Cleanup**: Connection health monitoring and cleanup runs every minute
+- **Improved Health Validation**: More accurate connection health checks to prevent false positives
+- **Better Error Handling**: Smarter detection of legitimate connection issues vs. security threats
+- **Reduced Noise**: Eliminated unnecessary "unknown client" disconnect logs for normal operations
+
+### Spring Boot Integration
+
+- **Scheduled Tasks**: Enabled Spring's `@Scheduled` annotation for automatic maintenance
+- **Component-based Architecture**: Connection logging implemented as a Spring `@Component`
+- **Dependency Injection**: Full integration with Spring's dependency injection system
+
+## Changelog from v1.2 to v1.3
+
+### Added
+
+- Complete connection event logging system with admin API
+- Automatic scheduled cleanup every minute
+- Connection statistics and analytics
+- Smart filtering to avoid logging invalid connection attempts
+- Memory-efficient log management with rotation
+
+### Improved
+
+- Enhanced connection health validation accuracy
+- Better error classification and handling
+- Reduced false positive disconnection logs
+- More comprehensive admin API functionality
+
+### Fixed
+
+- Eliminated "unknown client" logs for normal failed connections
+- Improved socket health checking to prevent false positives
+- Better handling of connection cleanup during scheduled maintenance
+
 ## Client Mode Features
 
 ### Automatic Reconnection
+
 The proxy client includes robust reconnection capabilities:
 
 - **Automatic Retry**: Attempts to reconnect every 5 seconds when connection is lost
@@ -28,7 +104,7 @@ The proxy client includes robust reconnection capabilities:
 - **Connection Health Detection**: Automatically detects and recovers from connection issues
 - **External Control**: Supports external `forceReconnect()` and status checking via `isRunning()`
 
-### Enhanced Connection Management
+### Client Connection Management
 
 - **Socket Health Monitoring**: Comprehensive connection testing without interfering with data streams
 - **Zombie Connection Prevention**: Automatic detection and cleanup of unhealthy connections
@@ -42,7 +118,7 @@ The proxy client includes robust reconnection capabilities:
 - **Timeout Management**: Intelligent handling of socket timeouts and network delays
 - **Debug Information**: Comprehensive logging for troubleshooting connection issues
 
-## Server Mode Features
+### Server Mode Features
 
 ### Enhanced Health Monitoring
 
@@ -50,12 +126,23 @@ The proxy client includes robust reconnection capabilities:
 - **Connection Health Checks**: Automatic validation of client connections before forwarding requests
 - **Zombie Connection Cleanup**: Automatic removal of unhealthy or abandoned connections
 - **Administrative Cleanup**: Manual connection cleanup via admin API endpoints
+- **Scheduled Maintenance**: Automatic connection cleanup runs every minute to maintain optimal performance
 
 ### Advanced Connection Management
+
 - **Client Name Resolution**: Track and manage clients by their registered names
 - **Connection Lifecycle Management**: Proper handling of client connect/disconnect events
 - **Health Status Reporting**: Detailed health information including client lists and connection counts
 - **Automatic Cleanup**: Intelligent removal of failed connections during normal operations
+- **Connection Logging**: Comprehensive logging of all client connection events with timestamps and metadata
+
+### Connection Event Logging
+
+- **Real-time Event Tracking**: Every client connect/disconnect is logged with precise timestamps
+- **Client Identification**: Track connections by client name and IP address
+- **Event Categorization**: Separate logging for successful connections vs. failed attempts
+- **Historical Data**: Maintain connection history for analysis and troubleshooting
+- **Admin API Access**: Retrieve and manage connection logs via REST endpoints
 
 ### Timeout and Error Handling
 
@@ -68,22 +155,22 @@ The proxy client includes robust reconnection capabilities:
 
 ### Build the Application
 
-```
+```bash
 mvn clean package
 ```
 
 ### Run in Server Mode
 
-```
-java -jar target/proxy-0.1.jar server
+```bash
+java -jar target/proxy-1.3.jar server
 ```
 
 - The server will start the REST API (default port: 9999) and listen for client socket connections (default port: 5000).
 
 ### Run in Client Mode
 
-```
-java -jar target/proxy-0.1.jar client <clientName> <serverHost> <serverPort> <authToken>
+```bash
+java -jar target/proxy-1.3.jar client <clientName> <serverHost> <serverPort> <authToken>
 ```
 
 - `clientName`: Unique name for this client (required)
@@ -93,8 +180,8 @@ java -jar target/proxy-0.1.jar client <clientName> <serverHost> <serverPort> <au
 
 **Example:**
 
-```
-java -jar target/proxy-0.1.jar client myClient public.server.com 5000 my-secure-token-123
+```bash
+java -jar target/proxy-1.3.jar client myClient public.server.com 5000 my-secure-token-123
 ```
 
 **Note:** The authentication token must match the `proxy.auth.token` value configured in the server's `application.properties` file.
@@ -103,7 +190,7 @@ java -jar target/proxy-0.1.jar client myClient public.server.com 5000 my-secure-
 
 Send a POST request to the server's `/api/forward` endpoint with a JSON body. **Authentication is required** - include your admin API key in the Authorization header:
 
-```
+```http
 POST http://localhost:9999/api/forward
 Authorization: Bearer your-admin-api-key
 Content-Type: application/json
@@ -134,7 +221,7 @@ proxy.admin.api.key=your-secure-admin-key-here
 
 #### Security Management
 
-```
+```http
 POST /api/admin/security
 Authorization: Bearer your-admin-api-key
 Content-Type: application/json
@@ -154,7 +241,7 @@ Available actions:
 
 #### Security Status (Authentication Required)
 
-```
+```http
 GET /api/security-status
 Authorization: Bearer your-admin-api-key
 ```
@@ -163,7 +250,7 @@ Returns information about banned IPs, threat detection statistics, and security 
 
 #### Server Health Check (No Auth Required)
 
-```
+```http
 GET /api/health
 ```
 
@@ -188,18 +275,81 @@ Returns comprehensive server health information including:
 
 #### Connection Management (Authentication Required)
 
-```
+```bash
 POST /api/cleanup-connections
 Authorization: Bearer your-admin-api-key
 ```
 
-Manually triggers cleanup of unhealthy or zombie connections. The server automatically performs this cleanup during normal operations, but this endpoint allows for manual intervention when needed.
+Manually triggers cleanup of unhealthy or zombie connections. The server automatically performs this cleanup every minute, but this endpoint allows for manual intervention when needed.
 
-**Example:**
+#### Connection Log Management (Authentication Required)
+
+**Get Connection Logs:**
 
 ```bash
-curl -X POST http://localhost:9999/api/cleanup-connections \
-  -H "Authorization: Bearer your-admin-api-key"
+GET /api/admin/connection-logs
+Authorization: Bearer your-admin-api-key
+```
+
+Retrieves connection logs with optional filtering:
+
+- `eventType`: Filter by "CONNECT" or "DISCONNECT"
+- `clientName`: Filter by specific client name
+- `limit`: Limit number of returned results (most recent entries)
+
+**Example with filters:**
+
+```bash
+GET /api/admin/connection-logs?eventType=CONNECT&limit=50
+Authorization: Bearer your-admin-api-key
+```
+
+**Clear Connection Logs:**
+
+```bash
+POST /api/admin/connection-logs/clear
+Authorization: Bearer your-admin-api-key
+```
+
+Clears all stored connection logs. Use with caution as this action cannot be undone.
+
+**Example Response:**
+
+```json
+{
+  "success": true,
+  "timestamp": "2025-06-26T10:30:15",
+  "logs": [
+    {
+      "event": "CONNECT",
+      "timestamp": "2025-06-26T10:29:45.123",
+      "clientName": "client1",
+      "clientIP": "192.168.1.100",
+      "message": "Client 'client1' connected from 192.168.1.100"
+    },
+    {
+      "event": "DISCONNECT",
+      "timestamp": "2025-06-26T10:30:10.456",
+      "clientName": "client1",
+      "clientIP": "192.168.1.100",
+      "reason": "Connection terminated",
+      "message": "Client 'client1' disconnected from 192.168.1.100 - Reason: Connection terminated"
+    }
+  ],
+  "statistics": {
+    "totalLogEntries": 2,
+    "totalConnections": 1,
+    "totalDisconnections": 1,
+    "uniqueClients": 1,
+    "uniqueIPs": 1
+  },
+  "totalReturned": 2,
+  "filters": {
+    "eventType": null,
+    "clientName": null,
+    "limit": null
+  }
+}
 ```
 
 ### Example Admin Requests
@@ -260,15 +410,40 @@ curl -X POST http://localhost:9999/api/cleanup-connections \
   -H "Authorization: Bearer your-admin-api-key"
 ```
 
+**Get connection logs:**
+
+```bash
+curl -X GET http://localhost:9999/api/admin/connection-logs \
+  -H "Authorization: Bearer your-admin-api-key"
+```
+
+**Get filtered connection logs:**
+
+```bash
+curl -X GET "http://localhost:9999/api/admin/connection-logs?eventType=CONNECT&limit=10" \
+  -H "Authorization: Bearer your-admin-api-key"
+```
+
+**Clear connection logs:**
+
+```bash
+curl -X POST http://localhost:9999/api/admin/connection-logs/clear \
+  -H "Authorization: Bearer your-admin-api-key"
+```
+
 ## Project Structure
 
-- `ProxyApplication.java`: Main entry point, handles mode selection.
-- `ProxyClient.java`: Client mode logic.
-- `controllers/GeneralController.java`: REST API controller.
-- `controllers/ClientHandler.java`: Handles socket communication with clients, includes 30-second timeout handling and connection health monitoring.
-- `services/ProxyService.java`: Business logic, socket server management, client health tracking, and connection cleanup for server mode.
+- `ProxyApplication.java`: Main entry point with mode selection and scheduled task configuration.
+- `ProxyClient.java`: Client mode logic with enhanced health checking and reconnection capabilities.
+- `controllers/GeneralController.java`: REST API controller with comprehensive admin endpoints.
+- `controllers/ClientHandler.java`: Socket communication handler with 30-second timeout handling and connection health monitoring.
+- `services/ProxyService.java`: Business logic, socket server management, client health tracking, connection cleanup, and scheduled maintenance.
 - `utils/Logger.java`: Enhanced logging utility with debug support and detailed error analysis.
+- `utils/ConnectionLogger.java`: **New in v1.3** - Comprehensive connection event logging system with filtering and statistics.
+- `utils/AdminAuthUtils.java`: Admin authentication and authorization utilities.
+- `utils/ServerUtils.java`: Server configuration and utility functions.
 - `shared/ProxyRequest.java`, `shared/ProxyResponse.java`: Serializable request/response objects for robust communication.
+- `config/CorsConfig.java`: CORS configuration for web API access.
 
 ## Security System
 
@@ -306,10 +481,22 @@ The proxy system includes robust error handling for reliable communication:
 ### Server-Side Connection Management
 
 - **Real-time Client Tracking**: Monitor connected clients via `/api/health` endpoint
-- **Automatic Cleanup**: Unhealthy connections are automatically detected and removed
+- **Automatic Cleanup**: Unhealthy connections are automatically detected and removed every minute via scheduled task
 - **Manual Cleanup**: Use `/api/cleanup-connections` endpoint for manual intervention
 - **Connection Validation**: Each request validates client connection health before forwarding
 - **Zombie Connection Prevention**: Automatic detection and removal of abandoned connections
+- **Connection Event Logging**: All client connections and disconnections are logged with timestamps and metadata
+
+### Server Connection Event Logging System
+
+The proxy server now includes a comprehensive connection logging system:
+
+- **Real-time Tracking**: Every client connect/disconnect event is logged immediately
+- **Detailed Metadata**: Logs include timestamp, client name, IP address, and event reason
+- **Event Filtering**: Filter logs by event type (CONNECT/DISCONNECT) or client name
+- **Statistics**: Track connection patterns, unique clients, and historical data
+- **Admin Management**: Retrieve, filter, and clear logs via admin API endpoints
+- **Memory Management**: Automatic log rotation to prevent memory issues (max 1000 entries)
 
 ### Client-Side Connection Management
 
@@ -393,7 +580,7 @@ The client now logs extensive information during operation:
 
 #### Example Debug Output
 
-```
+```text
 [2025-05-29 10:30:15.123] [INFO] =====================================
 [2025-05-29 10:30:15.124] [INFO]     PROXY CLIENT STARTING
 [2025-05-29 10:30:15.125] [INFO] =====================================
@@ -502,11 +689,25 @@ The client now logs extensive information during operation:
 - **Authentication Failures**: Watch security logs for potential attacks
 - **Response Times**: Monitor request/response processing times
 - **Reconnection Frequency**: Track client reconnection attempts
+- **Connection Event Logs**: Monitor connection patterns via `/api/admin/connection-logs`
+- **Connection Statistics**: Track unique clients, total connections, and historical data
+
+### Connection Logging and Analytics
+
+The v1.3 connection logging system provides comprehensive monitoring capabilities:
+
+- **Event Tracking**: Monitor all client connections and disconnections in real-time
+- **Historical Analysis**: Access historical connection data for pattern analysis
+- **Client Behavior**: Track individual client connection patterns and reliability
+- **IP Analysis**: Monitor connections by IP address for security insights
+- **Performance Metrics**: Analyze connection duration and frequency patterns
 
 ### Best Practices
 
 - **Regular Health Checks**: Monitor the `/api/health` endpoint regularly
-- **Connection Cleanup**: Use automated monitoring to trigger `/api/cleanup-connections` when needed
+- **Connection Log Analysis**: Review `/api/admin/connection-logs` for connection patterns
+- **Automated Monitoring**: Set up alerts for unusual connection patterns or high disconnect rates
 - **Security Monitoring**: Regular checks of `/api/security-status` for threat detection
-- **Log Analysis**: Review debug logs for connection patterns and potential issues
+- **Log Management**: Periodically clear connection logs via `/api/admin/connection-logs/clear` to manage memory
 - **Resource Monitoring**: Track server memory and CPU usage, especially with many connected clients
+- **Scheduled Maintenance**: The automatic cleanup runs every minute - monitor its effectiveness
