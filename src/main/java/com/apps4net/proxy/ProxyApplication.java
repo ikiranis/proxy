@@ -2,6 +2,7 @@ package com.apps4net.proxy;
 
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.scheduling.annotation.EnableScheduling;
 import com.apps4net.proxy.utils.Logger;
 
 /**
@@ -39,6 +40,7 @@ import com.apps4net.proxy.utils.Logger;
  * @since 1.0
  */
 @SpringBootApplication
+@EnableScheduling
 public class ProxyApplication {
 
 	/**

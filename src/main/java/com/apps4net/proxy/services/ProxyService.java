@@ -2,6 +2,7 @@ package com.apps4net.proxy.services;
 
 import org.springframework.stereotype.Service;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.scheduling.annotation.Scheduled;
 import jakarta.annotation.PostConstruct;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.Map;
@@ -376,5 +377,45 @@ public class ProxyService {
         }
         
         return clientDetails;
+    }
+
+    /**
+     * Scheduled task that automatically cleans up unhealthy client connections every minute.
+     * 
+     * This method runs in the background and performs the following operations:
+     * - Validates all client connections using socket state checks
+     * - Performs heartbeat tests to detect unresponsive clients
+     * - Removes and logs disconnections for unhealthy connections
+     * - Prevents accumulation of zombie connections that appear connected but are broken
+     * 
+     * The cleanup runs every 60 seconds (1 minute) to maintain accurate connection state
+     * without excessive overhead. This ensures that the server's view of connected clients
+     * remains accurate and that resources are properly freed.
+     * 
+     * All disconnections detected during cleanup are properly logged through the
+     * ConnectionLogger for monitoring and auditing purposes.
+     * 
+     * @since 1.2
+     */
+    @Scheduled(fixedRate = 60000) // Run every 60 seconds (1 minute)
+    public void scheduledConnectionCleanup() {
+        try {
+            Logger.debug("Starting scheduled connection cleanup...");
+            int removedConnections = cleanupUnhealthyConnections();
+            
+            if (removedConnections > 0) {
+                Logger.info("Scheduled cleanup completed: removed " + removedConnections + " unhealthy connections");
+            } else {
+                Logger.debug("Scheduled cleanup completed: all connections healthy");
+            }
+            
+            // Log current connection state
+            int activeConnections = getConnectedClientCount();
+            Logger.debug("Active connections after cleanup: " + activeConnections);
+            
+        } catch (Exception e) {
+            Logger.error("Error during scheduled connection cleanup: " + e.getMessage());
+            // Don't rethrow the exception to prevent the scheduler from stopping
+        }
     }
 }

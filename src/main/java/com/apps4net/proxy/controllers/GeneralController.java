@@ -140,23 +140,24 @@ public class GeneralController {
      * - Server status (healthy/unhealthy based on client connections)
      * - Current timestamp
      * - Socket server availability
-     * - Number of connected clients (after cleanup of unhealthy connections)
+     * - Number of connected clients
      * - List of connected client names
      * - Detailed client information including connection start times and uptime
      * - Server version information
-     * - Count of unhealthy connections that were removed during the health check
+     * - Automatic cleanup status information
      * 
      * The server is considered unhealthy if no proxy clients are connected,
      * as this means the proxy service cannot fulfill its primary function.
      * 
-     * This endpoint automatically performs connection cleanup to ensure accurate
-     * reporting of active connections. Stale or broken connections are removed
-     * before calculating the health status.
+     * Note: Connection cleanup is now performed automatically every minute via
+     * a scheduled background task, so this endpoint provides current status
+     * without triggering additional cleanup operations.
      * 
      * Client details include:
      * - Client name
      * - Connection start time (ISO format)
      * - Human-readable uptime duration
+     * - Connection status
      * - Connection status
      * 
      * This endpoint can be used by:
@@ -176,8 +177,8 @@ public class GeneralController {
         Map<String, Object> healthInfo = new HashMap<>();
         
         try {
-            // Clean up unhealthy connections before reporting health status
-            int removedConnections = proxyService.cleanupUnhealthyConnections();
+            // Note: Automatic cleanup now runs every minute via scheduled task
+            // No need to perform cleanup on every health check
             
             int connectedClients = proxyService.getConnectedClientCount();
             java.util.List<String> connectedClientNames = proxyService.getConnectedClientNames();
@@ -191,7 +192,7 @@ public class GeneralController {
             healthInfo.put("connectedClients", connectedClients);
             healthInfo.put("connectedClientNames", connectedClientNames);
             healthInfo.put("clientDetails", clientDetails);
-            healthInfo.put("removedUnhealthyConnections", removedConnections);
+            healthInfo.put("automaticCleanup", "Enabled (runs every 60 seconds)");
             healthInfo.put("uptime", ServerUtils.getServerUptime());
             
             // Check if any clients are connected
