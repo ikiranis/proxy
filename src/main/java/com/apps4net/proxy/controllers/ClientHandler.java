@@ -239,13 +239,12 @@ public class ClientHandler extends Thread {
                 clients.remove(clientName);
                 Logger.info("Client removed. Remaining clients: " + clients.size());
                 
-                // Log the disconnection
+                // Log the disconnection only for successfully registered clients
                 connectionLogger.logDisconnection(clientName, clientIP, "Connection terminated");
             } else {
                 Logger.info("No client name to remove (connection failed before registration)");
-                
-                // Log the disconnection for unknown client
-                connectionLogger.logDisconnection(null, clientIP, "Connection failed before client registration");
+                // Do not log disconnection for clients that never successfully registered
+                // This avoids "UNKNOWN" disconnect logs for failed authentication, HTTP requests, etc.
             }
             try { 
                 socket.close(); 
