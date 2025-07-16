@@ -459,7 +459,10 @@ public class ProxyClient {
             
             // Perform active server validation if streams are available
             if (objectOut != null && objectIn != null) {
+                Logger.debug("Socket appears healthy locally, performing active server validation...");
                 return performActiveServerValidation(objectOut, objectIn);
+            } else {
+                Logger.debug("Object streams not available, performing basic socket validation only");
             }
             
             return true;
@@ -472,22 +475,22 @@ public class ProxyClient {
     /**
      * Performs active server validation by testing if the server still recognizes this client.
      * 
-     * This method sends a simple test message to the server and waits for acknowledgment
-     * to verify that the server still has this client in its connection pool and can
-     * communicate with it. This is more reliable than just checking socket state locally.
+     * This method performs non-intrusive validation that doesn't interfere with the normal
+     * request/response flow. It uses basic stream and socket validation rather than sending
+     * actual messages that could disrupt ongoing communication.
      * 
-     * The validation works by sending a small, innocuous request that should always
-     * succeed if the connection is truly healthy from the server's perspective.
-     * 
-     * @param objectOut the ObjectOutputStream for sending the test message
-     * @param objectIn the ObjectInputStream for receiving the response
-     * @return true if the server successfully responds, false if connection is dead
+     * @param objectOut the ObjectOutputStream for validation
+     * @param objectIn the ObjectInputStream for validation
+     * @return true if the connection appears healthy, false if connection is dead
      */
     private boolean performActiveServerValidation(ObjectOutputStream objectOut, ObjectInputStream objectIn) {
         try {
             Logger.debug("Performing active server validation for client: " + clientName);
             
-            // Test with a simple flush operation first
+            // Test basic stream operations without sending actual messages
+            // This avoids interfering with the normal request/response flow
+            
+            // Test 1: Check if we can flush the output stream
             try {
                 objectOut.flush();
                 Logger.debug("ObjectOutputStream flush successful");
@@ -496,7 +499,7 @@ public class ProxyClient {
                 return false;
             }
             
-            // Test input stream availability
+            // Test 2: Check if input stream is accessible
             try {
                 objectIn.available();
                 Logger.debug("ObjectInputStream accessible");
@@ -505,56 +508,50 @@ public class ProxyClient {
                 return false;
             }
             
-            // Additional validation: try to check if there's any pending data
-            // This can detect some types of broken connections
+            // Test 3: Enhanced socket validation via reflection
             try {
-                // Use reflection to access the underlying socket if possible
-                // This allows us to perform more detailed connection validation
                 java.lang.reflect.Field socketField = null;
-                try {
-                    socketField = objectOut.getClass().getDeclaredField("socket");
-                    if (socketField == null) {
-                        // Try alternative field names that might exist
-                        Class<?> currentClass = objectOut.getClass();
-                        while (currentClass != null && socketField == null) {
-                            for (java.lang.reflect.Field field : currentClass.getDeclaredFields()) {
-                                if (field.getType() == Socket.class) {
-                                    socketField = field;
-                                    break;
-                                }
+                Class<?> currentClass = objectOut.getClass();
+                while (currentClass != null && socketField == null) {
+                    try {
+                        for (java.lang.reflect.Field field : currentClass.getDeclaredFields()) {
+                            if (field.getType() == Socket.class) {
+                                socketField = field;
+                                break;
                             }
-                            currentClass = currentClass.getSuperclass();
                         }
+                    } catch (Exception e) {
+                        // Continue searching in parent class
                     }
-                } catch (Exception e) {
-                    // If we can't access socket via reflection, that's okay
-                    Logger.debug("Could not access socket via reflection for enhanced validation");
+                    currentClass = currentClass.getSuperclass();
                 }
                 
                 if (socketField != null) {
                     socketField.setAccessible(true);
-                    Socket socket = (Socket) socketField.get(objectOut);
-                    if (socket != null) {
-                        // Check if socket is still properly connected
-                        if (socket.isClosed() || !socket.isConnected() || 
-                            socket.isInputShutdown() || socket.isOutputShutdown()) {
+                    @SuppressWarnings("resource") // Socket is obtained via reflection, not our resource to close
+                    Socket socketFromReflection = (Socket) socketField.get(objectOut);
+                    
+                    if (socketFromReflection != null) {
+                        // Check socket state without sending data
+                        if (socketFromReflection.isClosed() || !socketFromReflection.isConnected() || 
+                            socketFromReflection.isInputShutdown() || socketFromReflection.isOutputShutdown()) {
                             Logger.debug("Server validation failed: underlying socket is in bad state");
                             return false;
                         }
                         
-                        // Quick socket health test
+                        // Test socket streams without blocking
                         try {
-                            socket.getInputStream().available();
+                            socketFromReflection.getInputStream().available();
+                            socketFromReflection.getOutputStream(); // Just access, don't write
                         } catch (Exception e) {
-                            Logger.debug("Server validation failed: socket input stream not accessible");
+                            Logger.debug("Server validation failed: socket streams not accessible - " + e.getMessage());
                             return false;
                         }
                     }
                 }
-                
             } catch (Exception e) {
-                // If reflection fails, that's not necessarily a connection problem
                 Logger.debug("Enhanced socket validation could not be performed: " + e.getMessage());
+                // This is not a failure - just means we can't do enhanced validation
             }
             
             Logger.debug("Server validation successful - connection appears healthy");

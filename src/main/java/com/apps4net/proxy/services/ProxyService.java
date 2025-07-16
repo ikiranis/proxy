@@ -10,7 +10,6 @@ import java.util.HashMap;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.io.IOException;
-import com.apps4net.proxy.services.ClientHandlerService;
 import com.apps4net.proxy.shared.ProxyRequest;
 import com.apps4net.proxy.shared.ProxyResponse;
 import com.apps4net.proxy.utils.Logger;
