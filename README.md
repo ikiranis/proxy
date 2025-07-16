@@ -436,7 +436,7 @@ curl -X POST http://localhost:9999/api/admin/connection-logs/clear \
 - `ProxyApplication.java`: Main entry point with mode selection and scheduled task configuration.
 - `ProxyClient.java`: Client mode logic with enhanced health checking and reconnection capabilities.
 - `controllers/GeneralController.java`: REST API controller with comprehensive admin endpoints.
-- `controllers/ClientHandler.java`: Socket communication handler with 30-second timeout handling and connection health monitoring.
+- `services/ClientHandlerService.java`: Socket communication handler with 30-second timeout handling and connection health monitoring.
 - `services/ProxyService.java`: Business logic, socket server management, client health tracking, connection cleanup, and scheduled maintenance.
 - `utils/Logger.java`: Enhanced logging utility with debug support and detailed error analysis.
 - `utils/ConnectionLogger.java`: **New in v1.3** - Comprehensive connection event logging system with filtering and statistics.

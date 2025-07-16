@@ -1,4 +1,4 @@
-package com.apps4net.proxy.controllers;
+package com.apps4net.proxy.services;
 
 import java.net.Socket;
 import java.util.Map;
@@ -30,9 +30,9 @@ import java.time.temporal.ChronoUnit;
  * @version 1.0
  * @since 1.0
  */
-public class ClientHandler extends Thread {
+public class ClientHandlerService extends Thread {
     private final Socket socket;
-    private final Map<String, ClientHandler> clients;
+    private final Map<String, ClientHandlerService> clients;
     private final String requiredAuthToken;
     private final LocalDateTime connectionStartTime;
     private final com.apps4net.proxy.utils.ConnectionLogger connectionLogger;
@@ -55,14 +55,14 @@ public class ClientHandler extends Thread {
     private static final int GRACE_PERIOD_MINUTES = 30;    // Grace period after manual unban (30 minutes)
 
     /**
-     * Creates a new ClientHandler for managing communication with a connected client.
+     * Creates a new ClientHandlerService for managing communication with a connected client.
      * 
      * @param socket the socket connection to the client
      * @param clients the shared map of all connected clients for registration management
      * @param authToken the required authentication token for client verification
      * @param connectionLogger the connection logger for tracking connection events
      */
-    public ClientHandler(Socket socket, Map<String, ClientHandler> clients, String authToken, com.apps4net.proxy.utils.ConnectionLogger connectionLogger) {
+    public ClientHandlerService(Socket socket, Map<String, ClientHandlerService> clients, String authToken, com.apps4net.proxy.utils.ConnectionLogger connectionLogger) {
         this.socket = socket;
         this.clients = clients;
         this.requiredAuthToken = authToken;

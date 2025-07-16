@@ -10,7 +10,7 @@
 	</parent>
 	<groupId>com.apps4net</groupId>
 	<artifactId>proxy</artifactId>
-	<version>1.3</version>
+	<version>1.4</version>
 	<name>proxy</name>
 	<description>A reverse proxy service</description>
 	<url/>

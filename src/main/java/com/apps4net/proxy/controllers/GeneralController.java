@@ -9,6 +9,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.HttpStatus;
 import com.apps4net.proxy.services.ProxyService;
+import com.apps4net.proxy.services.ClientHandlerService;
 import com.apps4net.proxy.shared.ProxyRequest;
 import com.apps4net.proxy.shared.ProxyResponse;
 import com.apps4net.proxy.utils.ServerUtils;
@@ -37,7 +38,7 @@ public class GeneralController {
     private final ProxyService proxyService;
     private final AdminAuthUtils adminAuthUtils;
     private final com.apps4net.proxy.utils.ConnectionLogger connectionLogger;
-    private static final String PROJECT_VERSION = "1.3";
+    private static final String PROJECT_VERSION = "1.4";
 
     /**
      * Constructs a new GeneralController with the specified services.
@@ -269,9 +270,9 @@ public class GeneralController {
         try {
             // Get current security statistics
             securityInfo.put("timestamp", LocalDateTime.now().format(DateTimeFormatter.ISO_LOCAL_DATE_TIME));
-            securityInfo.put("bannedIPs", ClientHandler.getBannedIPs());
-            securityInfo.put("suspiciousAttempts", ClientHandler.getSuspiciousAttempts());
-            securityInfo.put("bannedIPCount", ClientHandler.getBannedIPs().size());
+            securityInfo.put("bannedIPs", ClientHandlerService.getBannedIPs());
+            securityInfo.put("suspiciousAttempts", ClientHandlerService.getSuspiciousAttempts());
+            securityInfo.put("bannedIPCount", ClientHandlerService.getBannedIPs().size());
             
             // Configuration information
             Map<String, Object> config = new HashMap<>();
@@ -354,7 +355,7 @@ public class GeneralController {
                         response.put("error", "Missing 'ip' parameter for ban action");
                         return ResponseEntity.badRequest().body(response);
                     }
-                    ClientHandler.banIP(ip.trim());
+                    ClientHandlerService.banIP(ip.trim());
                     response.put("success", true);
                     response.put("message", "IP " + ip + " has been banned");
                     response.put("action", "ban");
@@ -368,9 +369,9 @@ public class GeneralController {
                     }
                     
                     // Check auto-ban status before unbanning
-                    Map<String, Object> preBanStatus = ClientHandler.checkAutoBanStatus(ip.trim());
+                    Map<String, Object> preBanStatus = ClientHandlerService.checkAutoBanStatus(ip.trim());
                     
-                    boolean wasUnbanned = ClientHandler.unbanIP(ip.trim());
+                    boolean wasUnbanned = ClientHandlerService.unbanIP(ip.trim());
                     response.put("success", true);
                     if (wasUnbanned) {
                         response.put("message", "IP " + ip + " has been successfully unbanned and tracking data cleared");
@@ -387,8 +388,8 @@ public class GeneralController {
                     
                 case "status":
                     response.put("success", true);
-                    response.put("bannedIPs", ClientHandler.getBannedIPs());
-                    response.put("suspiciousAttempts", ClientHandler.getSuspiciousAttempts());
+                    response.put("bannedIPs", ClientHandlerService.getBannedIPs());
+                    response.put("suspiciousAttempts", ClientHandlerService.getSuspiciousAttempts());
                     response.put("action", "status");
                     break;
                     
@@ -400,8 +401,8 @@ public class GeneralController {
                     response.put("success", true);
                     response.put("action", "check");
                     response.put("ip", ip);
-                    response.put("isBanned", ClientHandler.getBannedIPs().contains(ip.trim()));
-                    response.put("autoBanStatus", ClientHandler.checkAutoBanStatus(ip.trim()));
+                    response.put("isBanned", ClientHandlerService.getBannedIPs().contains(ip.trim()));
+                    response.put("autoBanStatus", ClientHandlerService.checkAutoBanStatus(ip.trim()));
                     break;
                     
                 default:

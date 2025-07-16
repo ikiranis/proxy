@@ -10,7 +10,7 @@ import java.util.HashMap;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.io.IOException;
-import com.apps4net.proxy.controllers.ClientHandler;
+import com.apps4net.proxy.services.ClientHandlerService;
 import com.apps4net.proxy.shared.ProxyRequest;
 import com.apps4net.proxy.shared.ProxyResponse;
 import com.apps4net.proxy.utils.Logger;
@@ -33,7 +33,7 @@ import com.apps4net.proxy.utils.Logger;
  */
 @Service
 public class ProxyService {
-    private final Map<String, ClientHandler> clients = new ConcurrentHashMap<>();
+    private final Map<String, ClientHandlerService> clients = new ConcurrentHashMap<>();
     private static boolean socketServerStarted = false;
     private final com.apps4net.proxy.utils.ConnectionLogger connectionLogger;
     
@@ -72,12 +72,12 @@ public class ProxyService {
      * 
      * This method ensures that only one socket server instance is created
      * across all ProxyService instances. The server listens on port 5000 and
-     * creates a new ClientHandler thread for each incoming connection.
+     * creates a new ClientHandlerService thread for each incoming connection.
      * 
      * The socket server runs in a separate daemon thread to avoid blocking
      * the main application. Each client connection is handled asynchronously.
      * 
-     * @see ClientHandler
+     * @see ClientHandlerService
      */
     private synchronized void startSocketServerOnce() {
         if (!socketServerStarted) {
@@ -103,12 +103,12 @@ public class ProxyService {
                         Logger.info("Connection from: " + clientAddress);
                         Logger.info("Local socket: " + clientSocket.getLocalSocketAddress());
                         Logger.info("Connection established at: " + java.time.LocalDateTime.now());
-                        Logger.info("Starting ClientHandler thread...");
+                        Logger.info("Starting ClientHandlerService thread...");
                         
-                        ClientHandler handler = new ClientHandler(clientSocket, clients, authToken, connectionLogger);
+                        ClientHandlerService handler = new ClientHandlerService(clientSocket, clients, authToken, connectionLogger);
                         handler.start();
                         
-                        Logger.info("ClientHandler thread started for: " + clientAddress);
+                        Logger.info("ClientHandlerService thread started for: " + clientAddress);
                         Logger.info("=============================");
                     }
                 } catch (IOException e) {
@@ -158,11 +158,11 @@ public class ProxyService {
      * 
      * @see ProxyRequest
      * @see ProxyResponse
-     * @see ClientHandler#sendRequestAndGetResponse(ProxyRequest)
+     * @see ClientHandlerService#sendRequestAndGetResponse(ProxyRequest)
      */
     public ProxyResponse forwardToClient(ProxyRequest proxyRequest) throws Exception {
         String clientName = proxyRequest.getClientName();
-        ClientHandler client = clients.get(clientName);
+        ClientHandlerService client = clients.get(clientName);
 
         Logger.info("Forwarding request to client '" + clientName + "': " + proxyRequest);
 
@@ -195,7 +195,7 @@ public class ProxyService {
      * @see GeneralController#forwardToClient(ProxyRequest)
      */
     public boolean isClientConnected(String clientName) {
-        ClientHandler handler = clients.get(clientName);
+        ClientHandlerService handler = clients.get(clientName);
         if (handler == null) {
             return false;
         }
@@ -275,12 +275,12 @@ public class ProxyService {
      */
     public int cleanupUnhealthyConnections() {
         int removedCount = 0;
-        java.util.Iterator<Map.Entry<String, ClientHandler>> iterator = clients.entrySet().iterator();
+        java.util.Iterator<Map.Entry<String, ClientHandlerService>> iterator = clients.entrySet().iterator();
         
         while (iterator.hasNext()) {
-            Map.Entry<String, ClientHandler> entry = iterator.next();
+            Map.Entry<String, ClientHandlerService> entry = iterator.next();
             String clientName = entry.getKey();
-            ClientHandler handler = entry.getValue();
+            ClientHandlerService handler = entry.getValue();
             
             try {
                 // Test if the handler's connection is still healthy
@@ -307,7 +307,7 @@ public class ProxyService {
                     com.apps4net.proxy.shared.ProxyRequest heartbeatRequest = 
                         new com.apps4net.proxy.shared.ProxyRequest(clientName, "HEARTBEAT", "ping", "");
                     
-                    // Use the ClientHandler's sendRequest method with a short timeout
+                    // Use the ClientHandlerService's sendRequest method with a short timeout
                     boolean heartbeatSuccess = handler.sendHeartbeatRequest(heartbeatRequest);
                     
                     if (!heartbeatSuccess) {
@@ -363,9 +363,9 @@ public class ProxyService {
     public java.util.List<Map<String, Object>> getConnectedClientsDetails() {
         java.util.List<Map<String, Object>> clientDetails = new java.util.ArrayList<>();
         
-        for (Map.Entry<String, ClientHandler> entry : clients.entrySet()) {
+        for (Map.Entry<String, ClientHandlerService> entry : clients.entrySet()) {
             String clientName = entry.getKey();
-            ClientHandler handler = entry.getValue();
+            ClientHandlerService handler = entry.getValue();
             
             Map<String, Object> clientInfo = new HashMap<>();
             clientInfo.put("name", clientName);
