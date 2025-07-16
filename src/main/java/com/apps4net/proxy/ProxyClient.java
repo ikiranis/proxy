@@ -357,37 +357,43 @@ public class ProxyClient {
     }
 
     /**
-     * Starts a daemon thread that monitors connection health via periodic heartbeats.
+     * Starts a daemon thread that monitors connection health via API-based health checks.
      * 
      * The heartbeat thread:
      * - Runs every 30 seconds
-     * - Performs socket health checks including active hello/response verification
-     * - Logs connection status
-     * - Triggers reconnection if connection becomes unhealthy
+     * - Makes HTTP requests to the server's health API endpoint
+     * - Checks if the client connection is recognized as healthy by the server
+     * - Triggers reconnection if the server reports the client as disconnected
      * - Handles interruption gracefully during shutdown
      * 
+     * This approach is non-intrusive and doesn't interfere with the main
+     * request/response communication channel between client and server.
+     * 
      * @param socket the socket connection to monitor
-     * @param objectOut the ObjectOutputStream for active health checks
-     * @param objectIn the ObjectInputStream for active health checks
+     * @param objectOut the ObjectOutputStream (not used in API-based health checks)
+     * @param objectIn the ObjectInputStream (not used in API-based health checks)
      * @return the heartbeat thread instance for lifecycle management
      * 
-     * @see #isSocketHealthy(Socket, ObjectOutputStream, ObjectInputStream)
+     * @see #performApiHealthCheck()
      */
     private Thread startHeartbeatThread(Socket socket, ObjectOutputStream objectOut, ObjectInputStream objectIn) {
         Thread heartbeatThread = new Thread(() -> {
             while (isRunning && !socket.isClosed()) {
                 try {
                     Thread.sleep(HEARTBEAT_INTERVAL_MS);
-                    if (!isSocketHealthy(socket, objectOut, objectIn)) {
-                        Logger.error("Heartbeat: Socket connection is unhealthy - triggering reconnection");
+                    
+                    // Use API-based health check instead of socket manipulation
+                    if (!performApiHealthCheck()) {
+                        Logger.error("Heartbeat: API health check failed - server reports client as disconnected");
+                        Logger.error("Heartbeat: Triggering reconnection");
                         try {
                             socket.close(); // Force close to trigger reconnection in main loop
                         } catch (Exception e) {
-                            Logger.error("Error closing unhealthy socket: " + e.getMessage());
+                            Logger.error("Error closing socket after API health check failure: " + e.getMessage());
                         }
                         break;
                     } else {
-                        Logger.info("Heartbeat: Connection healthy (verified with server response)");
+                        Logger.info("Heartbeat: API health check passed - server recognizes client as healthy");
                     }
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
@@ -404,31 +410,24 @@ public class ProxyClient {
     }
 
     /**
-     * Performs a comprehensive health check on the socket connection with enhanced validation.
+     * Performs a basic health check on the socket connection.
      * 
-     * This method verifies connection health by:
+     * This method verifies connection health by checking local socket state only:
      * 1. Checking if the socket is open and connected
      * 2. Testing if the socket streams are accessible
      * 3. Checking for connection shutdown states
-     * 4. Verifying the socket is not in an error state
-     * 5. Performing enhanced stream and socket validation (when streams are provided)
+     * 4. Verifying basic stream availability
      * 
-     * When object streams are provided, this method performs additional validation
-     * including stream accessibility tests and underlying socket health checks.
-     * This helps detect false positives where the socket appears healthy locally
-     * but the connection is actually broken or the server has dropped it.
-     * 
-     * The method is designed to detect various connection failure scenarios:
-     * - Socket closed or not connected
-     * - Input/output streams shutdown
-     * - Network interruptions or timeouts
-     * - Stream corruption or broken pipes
-     * - Server-side connection drops not reflected in local socket state
+     * This method is designed to be lightweight and non-intrusive, performing
+     * only local checks without network communication. For comprehensive health
+     * validation including server-side verification, use performApiHealthCheck().
      * 
      * @param socket the socket connection to check
-     * @param objectOut the ObjectOutputStream for enhanced validation (can be null)
-     * @param objectIn the ObjectInputStream for enhanced validation (can be null)
-     * @return true if the socket is healthy and communication appears to work, false otherwise
+     * @param objectOut the ObjectOutputStream (may be null)
+     * @param objectIn the ObjectInputStream (may be null)
+     * @return true if the socket appears healthy locally, false otherwise
+     * 
+     * @see #performApiHealthCheck()
      */
     private synchronized boolean isSocketHealthy(Socket socket, ObjectOutputStream objectOut, ObjectInputStream objectIn) {
         if (socket == null || socket.isClosed() || !socket.isConnected()) {
@@ -457,15 +456,9 @@ public class ProxyClient {
                 return false;
             }
             
-            // Perform active server validation if streams are available
-            if (objectOut != null && objectIn != null) {
-                Logger.debug("Socket appears healthy locally, performing active server validation...");
-                return performActiveServerValidation(objectOut, objectIn);
-            } else {
-                Logger.debug("Object streams not available, performing basic socket validation only");
-            }
-            
+            Logger.debug("Basic socket health check passed");
             return true;
+            
         } catch (Exception e) {
             Logger.debug("Socket health check failed: " + e.getMessage());
             return false;
@@ -483,117 +476,6 @@ public class ProxyClient {
      * @param objectIn the ObjectInputStream for validation
      * @return true if the connection appears healthy, false if connection is dead
      */
-    private boolean performActiveServerValidation(ObjectOutputStream objectOut, ObjectInputStream objectIn) {
-        try {
-            Logger.debug("Performing active server validation for client: " + clientName);
-            
-            // Test 1: Basic stream operations
-            try {
-                objectOut.flush();
-                Logger.debug("ObjectOutputStream flush successful");
-            } catch (Exception e) {
-                Logger.debug("Server validation failed: cannot flush output stream - " + e.getMessage());
-                return false;
-            }
-            
-            // Test 2: Check if input stream is accessible
-            try {
-                objectIn.available();
-                Logger.debug("ObjectInputStream accessible");
-            } catch (Exception e) {
-                Logger.debug("Server validation failed: cannot access input stream - " + e.getMessage());
-                return false;
-            }
-            
-            // Test 3: Network connectivity test - try to connect to server
-            try {
-                Logger.debug("Testing network connectivity to server...");
-                try (Socket testSocket = new Socket()) {
-                    testSocket.connect(new java.net.InetSocketAddress(serverHost, serverPort), 3000);
-                    Logger.debug("Network connectivity test passed - can reach server");
-                } catch (java.net.ConnectException e) {
-                    Logger.debug("Server validation failed: cannot connect to server - " + e.getMessage());
-                    return false;
-                } catch (java.net.SocketTimeoutException e) {
-                    Logger.debug("Server validation failed: connection timeout to server - " + e.getMessage());
-                    return false;
-                } catch (Exception e) {
-                    Logger.debug("Server validation failed: network connectivity test failed - " + e.getMessage());
-                    return false;
-                }
-            } catch (Exception e) {
-                Logger.debug("Could not perform network connectivity test: " + e.getMessage());
-                // Continue with other tests
-            }
-            
-            // Test 4: Enhanced socket validation via reflection
-            try {
-                java.lang.reflect.Field socketField = null;
-                Class<?> currentClass = objectOut.getClass();
-                while (currentClass != null && socketField == null) {
-                    try {
-                        for (java.lang.reflect.Field field : currentClass.getDeclaredFields()) {
-                            if (field.getType() == Socket.class) {
-                                socketField = field;
-                                break;
-                            }
-                        }
-                    } catch (Exception e) {
-                        // Continue searching in parent class
-                    }
-                    currentClass = currentClass.getSuperclass();
-                }
-                
-                if (socketField != null) {
-                    socketField.setAccessible(true);
-                    @SuppressWarnings("resource") // Socket is obtained via reflection, not our resource to close
-                    Socket socketFromReflection = (Socket) socketField.get(objectOut);
-                    
-                    if (socketFromReflection != null) {
-                        // Check socket state
-                        if (socketFromReflection.isClosed() || !socketFromReflection.isConnected() || 
-                            socketFromReflection.isInputShutdown() || socketFromReflection.isOutputShutdown()) {
-                            Logger.debug("Server validation failed: underlying socket is in bad state");
-                            return false;
-                        }
-                        
-                        // Test socket streams
-                        try {
-                            socketFromReflection.getInputStream().available();
-                            socketFromReflection.getOutputStream(); // Just access, don't write
-                        } catch (Exception e) {
-                            Logger.debug("Server validation failed: socket streams not accessible - " + e.getMessage());
-                            return false;
-                        }
-                        
-                        // Test 5: Check if the socket can send data (non-blocking test)
-                        try {
-                            // Try to write a single byte to test if the connection is truly alive
-                            // This is more aggressive than just checking socket state
-                            byte[] testByte = new byte[]{0};
-                            socketFromReflection.getOutputStream().write(testByte);
-                            socketFromReflection.getOutputStream().flush();
-                            Logger.debug("Socket write test successful");
-                        } catch (Exception e) {
-                            Logger.debug("Server validation failed: cannot write to socket - connection appears broken - " + e.getMessage());
-                            return false;
-                        }
-                    }
-                }
-            } catch (Exception e) {
-                Logger.debug("Enhanced socket validation could not be performed: " + e.getMessage());
-                // This is not a failure - just means we can't do enhanced validation
-            }
-            
-            Logger.debug("Server validation successful - connection appears healthy");
-            return true;
-            
-        } catch (Exception e) {
-            Logger.debug("Server validation failed: " + e.getMessage());
-            return false;
-        }
-    }
-
     /**
      * Determines if an exception is related to network connectivity issues.
      * 
@@ -984,5 +866,88 @@ public class ProxyClient {
         Logger.error("  - Verify network connectivity");
         Logger.error("  - Ensure authentication configuration is correct");
         Logger.error("=== End Connection Analysis ===");
+    }
+    
+    /**
+     * Performs API-based health check by calling the server's health endpoint.
+     * 
+     * This method makes an HTTP GET request to the server's /api/health/{clientName} endpoint
+     * to verify that the server recognizes this client as connected and healthy.
+     * This approach is non-intrusive and doesn't interfere with the main socket communication.
+     * 
+     * The method handles various failure scenarios:
+     * - Connection timeouts or network issues
+     * - HTTP error responses (404, 500, etc.)
+     * - JSON parsing errors
+     * - Server reporting client as disconnected
+     * 
+     * @return true if the server reports the client as healthy, false otherwise
+     */
+    private boolean performApiHealthCheck() {
+        try {
+            // Build the health check URL
+            String healthUrl = "http://" + serverHost + ":8080/api/health/" + clientName;
+            Logger.debug("Performing API health check: " + healthUrl);
+            
+            // Create HTTP connection
+            java.net.URI uri = java.net.URI.create(healthUrl);
+            java.net.URL url = uri.toURL();
+            java.net.HttpURLConnection conn = (java.net.HttpURLConnection) url.openConnection();
+            conn.setRequestMethod("GET");
+            conn.setRequestProperty("Content-Type", "application/json");
+            conn.setConnectTimeout(5000); // 5 second connection timeout
+            conn.setReadTimeout(10000); // 10 second read timeout
+            
+            // Get response
+            int responseCode = conn.getResponseCode();
+            Logger.debug("API health check response code: " + responseCode);
+            
+            if (responseCode == 200) {
+                // Read response body to get detailed status
+                try (java.io.BufferedReader reader = new java.io.BufferedReader(
+                        new java.io.InputStreamReader(conn.getInputStream()))) {
+                    StringBuilder response = new StringBuilder();
+                    String line;
+                    while ((line = reader.readLine()) != null) {
+                        response.append(line);
+                    }
+                    
+                    String responseBody = response.toString();
+                    Logger.debug("API health check response: " + responseBody);
+                    
+                    // Simple check for "healthy" status in JSON response
+                    if (responseBody.contains("\"status\":\"healthy\"") && 
+                        responseBody.contains("\"connected\":true")) {
+                        Logger.debug("API health check: Server reports client as healthy");
+                        return true;
+                    } else {
+                        Logger.debug("API health check: Server response indicates client is not healthy");
+                        return false;
+                    }
+                }
+            } else if (responseCode == 404) {
+                Logger.debug("API health check: Server reports client as not found (404)");
+                return false;
+            } else {
+                Logger.debug("API health check: Server returned error code " + responseCode);
+                return false;
+            }
+            
+        } catch (java.net.ConnectException e) {
+            Logger.debug("API health check failed: Cannot connect to server - " + e.getMessage());
+            return false;
+        } catch (java.net.SocketTimeoutException e) {
+            Logger.debug("API health check failed: Request timeout - " + e.getMessage());
+            return false;
+        } catch (java.net.UnknownHostException e) {
+            Logger.debug("API health check failed: Cannot resolve hostname - " + e.getMessage());
+            return false;
+        } catch (java.io.IOException e) {
+            Logger.debug("API health check failed: I/O error - " + e.getMessage());
+            return false;
+        } catch (Exception e) {
+            Logger.debug("API health check failed: Unexpected error - " + e.getMessage());
+            return false;
+        }
     }
 }

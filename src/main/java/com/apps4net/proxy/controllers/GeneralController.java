@@ -6,6 +6,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.HttpStatus;
 import com.apps4net.proxy.services.ProxyService;
@@ -625,5 +626,78 @@ public class GeneralController {
         filters.put("clientName", clientName);
         filters.put("limit", limit);
         return filters;
+    }
+
+    /**
+     * Checks the health status of a specific proxy client by name.
+     * 
+     * This endpoint allows clients to perform self-health checks by verifying
+     * their connection status with the server. It returns detailed information
+     * about whether the client is currently connected and has a healthy socket connection.
+     * 
+     * The endpoint performs comprehensive health validation including:
+     * - Checking if the client exists in the connection pool
+     * - Validating socket state (connected, not closed, streams not shutdown)
+     * - Verifying the connection is accessible and responsive
+     * 
+     * This API is designed for:
+     * - Client-side heartbeat and health monitoring
+     * - Automated reconnection logic
+     * - Administrative monitoring of specific clients
+     * - Troubleshooting connection issues
+     * 
+     * @param clientName the name of the client to check (from URL path)
+     * @return ResponseEntity containing client health information in JSON format
+     *         - 200: Client is connected and healthy
+     *         - 404: Client is not connected or not found
+     *         - 500: Error occurred while checking client health
+     * 
+     * @since 1.4
+     */
+    @GetMapping(path = "/api/health/{clientName}", produces = "application/json")
+    public ResponseEntity<Map<String, Object>> checkClientHealth(@PathVariable String clientName) {
+        Map<String, Object> healthInfo = new HashMap<>();
+        
+        try {
+            // Set basic response information
+            healthInfo.put("timestamp", LocalDateTime.now().format(DateTimeFormatter.ISO_LOCAL_DATE_TIME));
+            healthInfo.put("server", "Proxy Server");
+            healthInfo.put("version", PROJECT_VERSION);
+            healthInfo.put("clientName", clientName);
+            
+            // Check if the client is connected and healthy
+            boolean isConnected = proxyService.isClientConnected(clientName);
+            
+            if (isConnected) {
+                // Client is connected and healthy
+                healthInfo.put("status", "healthy");
+                healthInfo.put("connected", true);
+                healthInfo.put("message", "Client is connected and healthy");
+                healthInfo.put("connectionStatus", "active");
+                
+                return ResponseEntity.ok(healthInfo);
+            } else {
+                // Client is not connected or unhealthy
+                healthInfo.put("status", "disconnected");
+                healthInfo.put("connected", false);
+                healthInfo.put("message", "Client is not connected or connection is unhealthy");
+                healthInfo.put("connectionStatus", "inactive");
+                
+                return ResponseEntity.status(HttpStatus.NOT_FOUND).body(healthInfo);
+            }
+            
+        } catch (Exception e) {
+            // Error occurred while checking client health
+            healthInfo.put("status", "error");
+            healthInfo.put("connected", false);
+            healthInfo.put("timestamp", LocalDateTime.now().format(DateTimeFormatter.ISO_LOCAL_DATE_TIME));
+            healthInfo.put("server", "Proxy Server");
+            healthInfo.put("version", PROJECT_VERSION);
+            healthInfo.put("clientName", clientName);
+            healthInfo.put("error", e.getMessage());
+            healthInfo.put("message", "Error occurred while checking client health");
+            
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(healthInfo);
+        }
     }
 }
