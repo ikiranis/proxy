@@ -473,11 +473,11 @@ public class ProxyClient {
     }
 
     /**
-     * Performs active server validation by testing if the server still recognizes this client.
+     * Performs active server validation by testing network connectivity and socket health.
      * 
-     * This method performs non-intrusive validation that doesn't interfere with the normal
-     * request/response flow. It uses basic stream and socket validation rather than sending
-     * actual messages that could disrupt ongoing communication.
+     * This method performs comprehensive validation that can detect network connectivity
+     * issues, including cases where the local socket appears healthy but the network
+     * connection to the server is actually broken.
      * 
      * @param objectOut the ObjectOutputStream for validation
      * @param objectIn the ObjectInputStream for validation
@@ -487,10 +487,7 @@ public class ProxyClient {
         try {
             Logger.debug("Performing active server validation for client: " + clientName);
             
-            // Test basic stream operations without sending actual messages
-            // This avoids interfering with the normal request/response flow
-            
-            // Test 1: Check if we can flush the output stream
+            // Test 1: Basic stream operations
             try {
                 objectOut.flush();
                 Logger.debug("ObjectOutputStream flush successful");
@@ -508,7 +505,28 @@ public class ProxyClient {
                 return false;
             }
             
-            // Test 3: Enhanced socket validation via reflection
+            // Test 3: Network connectivity test - try to connect to server
+            try {
+                Logger.debug("Testing network connectivity to server...");
+                try (Socket testSocket = new Socket()) {
+                    testSocket.connect(new java.net.InetSocketAddress(serverHost, serverPort), 3000);
+                    Logger.debug("Network connectivity test passed - can reach server");
+                } catch (java.net.ConnectException e) {
+                    Logger.debug("Server validation failed: cannot connect to server - " + e.getMessage());
+                    return false;
+                } catch (java.net.SocketTimeoutException e) {
+                    Logger.debug("Server validation failed: connection timeout to server - " + e.getMessage());
+                    return false;
+                } catch (Exception e) {
+                    Logger.debug("Server validation failed: network connectivity test failed - " + e.getMessage());
+                    return false;
+                }
+            } catch (Exception e) {
+                Logger.debug("Could not perform network connectivity test: " + e.getMessage());
+                // Continue with other tests
+            }
+            
+            // Test 4: Enhanced socket validation via reflection
             try {
                 java.lang.reflect.Field socketField = null;
                 Class<?> currentClass = objectOut.getClass();
@@ -532,19 +550,32 @@ public class ProxyClient {
                     Socket socketFromReflection = (Socket) socketField.get(objectOut);
                     
                     if (socketFromReflection != null) {
-                        // Check socket state without sending data
+                        // Check socket state
                         if (socketFromReflection.isClosed() || !socketFromReflection.isConnected() || 
                             socketFromReflection.isInputShutdown() || socketFromReflection.isOutputShutdown()) {
                             Logger.debug("Server validation failed: underlying socket is in bad state");
                             return false;
                         }
                         
-                        // Test socket streams without blocking
+                        // Test socket streams
                         try {
                             socketFromReflection.getInputStream().available();
                             socketFromReflection.getOutputStream(); // Just access, don't write
                         } catch (Exception e) {
                             Logger.debug("Server validation failed: socket streams not accessible - " + e.getMessage());
+                            return false;
+                        }
+                        
+                        // Test 5: Check if the socket can send data (non-blocking test)
+                        try {
+                            // Try to write a single byte to test if the connection is truly alive
+                            // This is more aggressive than just checking socket state
+                            byte[] testByte = new byte[]{0};
+                            socketFromReflection.getOutputStream().write(testByte);
+                            socketFromReflection.getOutputStream().flush();
+                            Logger.debug("Socket write test successful");
+                        } catch (Exception e) {
+                            Logger.debug("Server validation failed: cannot write to socket - connection appears broken - " + e.getMessage());
                             return false;
                         }
                     }
