@@ -33,6 +33,9 @@ public class ProxyClient {
     private static final int RECONNECT_DELAY_MS = 5000; // 5 seconds
     private static final int HEARTBEAT_INTERVAL_MS = 30000; // 30 seconds
 
+    // HTTP port for API health checks (loaded from configuration)
+    private int httpPort = 9990; // Default value
+
     /**
      * Creates a new ProxyClient with the specified connection parameters.
      * 
@@ -46,6 +49,9 @@ public class ProxyClient {
         this.serverHost = serverHost;
         this.serverPort = serverPort;
         this.authToken = authToken;
+        
+        // Load configuration from application.properties
+        loadConfiguration();
     }
 
     /**
@@ -68,10 +74,12 @@ public class ProxyClient {
         Logger.info("=== ProxyClient Starting ===");
         Logger.info("Client Name: " + clientName);
         Logger.info("Server Host: " + serverHost);
-        Logger.info("Server Port: " + serverPort);
+        Logger.info("Server Socket Port: " + serverPort);
+        Logger.info("Server HTTP Port: " + httpPort);
         Logger.info("Auth Token: " + (authToken != null ? "***configured***" : "NOT SET"));
         Logger.info("Reconnection enabled: Yes (every " + (RECONNECT_DELAY_MS / 1000) + " seconds on failure)");
         Logger.info("Health monitoring: Yes (every " + (HEARTBEAT_INTERVAL_MS / 1000) + " seconds)");
+        Logger.info("Health check endpoint: http://" + serverHost + ":" + httpPort + "/api/health/" + clientName);
         Logger.info("============================");
         
         boolean firstAttempt = true;
@@ -885,8 +893,8 @@ public class ProxyClient {
      */
     private boolean performApiHealthCheck() {
         try {
-            // Build the health check URL
-            String healthUrl = "http://" + serverHost + ":8080/api/health/" + clientName;
+            // Build the health check URL using the configured HTTP port
+            String healthUrl = "http://" + serverHost + ":" + httpPort + "/api/health/" + clientName;
             Logger.debug("Performing API health check: " + healthUrl);
             
             // Create HTTP connection
@@ -948,6 +956,45 @@ public class ProxyClient {
         } catch (Exception e) {
             Logger.debug("API health check failed: Unexpected error - " + e.getMessage());
             return false;
+        }
+    }
+    
+    /**
+     * Loads configuration from application.properties file.
+     * This method reads the server.port property to determine the HTTP port
+     * for API health check calls.
+     */
+    private void loadConfiguration() {
+        try {
+            // Try to load application.properties from the classpath
+            java.io.InputStream input = getClass().getClassLoader().getResourceAsStream("application.properties");
+            if (input == null) {
+                Logger.debug("application.properties not found in classpath, using default HTTP port: " + httpPort);
+                return;
+            }
+            
+            java.util.Properties properties = new java.util.Properties();
+            properties.load(input);
+            
+            // Read server.port property
+            String serverPortStr = properties.getProperty("server.port");
+            if (serverPortStr != null && !serverPortStr.trim().isEmpty()) {
+                try {
+                    httpPort = Integer.parseInt(serverPortStr.trim());
+                    Logger.debug("Loaded HTTP port from application.properties: " + httpPort);
+                } catch (NumberFormatException e) {
+                    Logger.debug("Invalid server.port in application.properties: " + serverPortStr + ", using default: " + httpPort);
+                }
+            } else {
+                Logger.debug("server.port not found in application.properties, using default: " + httpPort);
+            }
+            
+            input.close();
+            
+        } catch (java.io.IOException e) {
+            Logger.debug("Failed to load application.properties: " + e.getMessage() + ", using default HTTP port: " + httpPort);
+        } catch (Exception e) {
+            Logger.debug("Unexpected error loading configuration: " + e.getMessage() + ", using default HTTP port: " + httpPort);
         }
     }
 }
